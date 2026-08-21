@@ -1,0 +1,404 @@
+---
+title: "sampler_comparison"
+output: html_document
+---
+
+The purpose of this file is to **locally** test and compare sampler performance.
+
+```{r set-up}
+## load libraries
+library(nimble)
+library(truncnorm)
+library(coda)
+library(tidyverse)
+library(nimbleNoBounds)
+
+## source helper functions
+dir <- "/work/users/a/g/agfoes/P1"
+source(paste0(dir, "/R/sampler_comparison/config_sampler_comparison.R"))                # config
+source(paste0(dir, "/R/helpers/helpers_data.R"))                                        # find_L, datagen
+source(paste0(dir, "/R/helpers/helpers_nimble.R"))                                      # nimble_constants, nimble_data_years, nimble_inits
+source(paste0(dir, "/R/helpers/helpers_sampler.R"))                                     # make_conf, run_sampler
+source(paste0(dir, "/R/helpers/helpers_summary.R"))                                     # posterior_summary, data_censoring_summary
+source(paste0(dir, "/R/model_code/model_normal_joint_betas.R"))
+joint_model_code <- model_code
+source(paste0(dir, "/R/model_code/model_normal.R"))
+univariate_model_code <- model_code
+
+## read simulation setting file
+result_dir <- file.path(config[["project_dir"]], "results", config[["run_name"]])
+sim_grid <- read.csv(file = file.path(result_dir, "sim_grid.csv"))
+
+## filter simulation settings to those matching this array's ID
+idx <- 1
+sim_grid_filt <- sim_grid %>% filter(sim_id == 501)
+
+```
+
+```{r data-gen}
+## get sim id and save level
+i = 1
+sim_id <- sim_grid_filt[["sim_id"]][i]
+save_level <- sim_grid_filt[["save_level"]][i]
+
+## get parameter values for planned censoring level
+alpha_start <- unlist(sim_grid_filt[i, c(
+  "alpha_start_1",
+  "alpha_start_2",
+  "alpha_start_3"
+)])
+alpha_width <- unlist(sim_grid_filt[i, c(
+  "alpha_width_1",
+  "alpha_width_2",
+  "alpha_width_3"
+)])
+
+set.seed(as.numeric(config[["sim_seed"]]) + sim_id)
+data <- datagen(n = sim_grid_filt[["n"]][i],
+                p_z2 = 0.8, 
+                mu_z3 = 2, 
+                sd_z3 = 1,
+                comps = 3, 
+                w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, 
+                beta_z = c(0,1,-1), 
+                tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = alpha_start, 
+                alpha_width = alpha_width,
+                sigma_start = 30, 
+                sigma_width = 0.15,
+                rho = c(0.85, 0.9, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = sim_grid_filt[["eps_obs"]][i])
+```
+
+```{r}
+## get nimble constants, data, inits for joint model code
+pz <- config[["pz"]]
+sigma_bx <- config[["sigma_bx"]]
+sigma_bz <- config[["sigma_bz"]]
+mu_gamma <- config[["mu_gamma"]]
+L <- config[["L"]]
+
+## joint model code
+joint_nimble_constants <- nimble_constants(data,
+                               L = config[["L"]], pz = pz,
+                               sigma_bx = sigma_bx,
+                               sigma_bz = sigma_bz,
+                               mu_gamma = mu_gamma)
+joint_nimble_data <- nimble_data_years(data,
+                           constants = joint_nimble_constants)
+joint_nimble_inits <- nimble_inits(data,
+                       pz = pz,
+                       constants = joint_nimble_constants,
+                       Ndata = joint_nimble_data)
+
+## univariate model code
+uni_nimble_constants <- list(
+    L = config[["L"]],
+    p = pz,
+    sigma_bx = sigma_bx,
+    sigma_bz = sigma_bz,
+    mu_gamma = mu_gamma,
+    nobs = sum(data$Dobs),
+    ncen = length(data$Y) - sum(data$Dobs),
+    idx_obs = which(data$Dobs == 1),
+    idx_cen = which(data$Dobs == 0)
+  )
+
+uni_nimble_data <- joint_nimble_data
+
+uni_nimble_inits <- joint_nimble_inits
+uni_nimble_inits[["betax"]] <- 0
+uni_nimble_inits[["betaz"]] <- rep(0, pz)
+
+```
+
+```{r}
+## fit model and get samples
+uni_model <- nimbleModel(
+  code = univariate_model_code,
+  data = uni_nimble_data,
+  constants = uni_nimble_constants,
+  inits = uni_nimble_inits
+)
+
+joint_model <- nimbleModel(
+  code = joint_model_code,
+  data = joint_nimble_data,
+  constants = joint_nimble_constants,
+  inits = joint_nimble_inits
+)
+
+uni_vars <- c("betax", "betaz[1]", "betaz[2]", "betaz[3]", "tau")
+joint_vars <- c("beta", "tau")
+
+set.seed(as.numeric(config[["sim_seed"]]) + 1000000 + sim_id*1000)
+
+sampler <- "default"
+uni_conf <- make_conf_univariate(uni_model, 
+                                sampler, 
+                                pz = pz, L = L, 
+                                vars = uni_vars)
+
+joint_conf <- make_conf(joint_model,
+                        sampler,
+                        pz = pz, L = L,
+                        vars = joint_vars)
+```
+
+```{r}
+sampler_beta_conjugate_block <- nimbleFunction(
+  contains = sampler_BASE,
+  
+  ## runs when nimble constructs the sampler -- contains things that don't change on each iteration
+  setup = function(model, mvSaved, target, control) {
+    
+    # model dimensions
+    p <- control$p
+    p_beta <- p + 1
+    
+    nobs <- as.integer(control$nobs)
+    ncen <- as.integer(control$ncen)
+    n <- nobs + ncen
+    
+    # prior distribution precision: Sigma_{beta}^{-1}
+    s_beta_inv <- inverse(model$beta_cov[1:p_beta, 1:p_beta])
+    
+    # fixed contribution of prior hypterparameters on posterior mean: Sigma_{beta}^{-1} * beta_0
+    beta_prior_num <- (s_beta_inv %>% model$beta_mean[1:p_beta])[, 1]
+    
+    # recalculate nodes depending on changes in beta
+    calcNodes <- model$getDependencies(target)
+  },
+  
+  ## runs at every MCMC iteration
+  run = function() {
+    
+    ## build current iteration's design matrix (X,Z) and outcome Y
+    W <- matrix(0, nrow = n, ncol = p_beta)
+    Y <- numeric(n)
+    
+    ## observed subjects
+    for (k in 1:nobs) {
+      W[k, 1] <- model$x_obs[k]
+      
+      for (j in 1:p) {
+        W[k, j+1] <- model$z_obs[k, j]
+      }
+      
+      Y[k] <- model$y_obs[k]
+    }
+    
+    ## censored subjects
+    for (k in 1:ncen) {
+      i <- nobs + k         # all the uncensored subjects are first in order, then add censored subjects after (lose relative position in original vector but this shouldn't matter for this)
+      
+      W[i, 1] <- model$x_cen[k]
+      
+      for (j in 1:p) {
+        W[i, j+1] <- model$z_cen[k, j]
+      }
+      
+      Y[i] <- model$y_cen[k]
+    }
+    
+    ## full conditional for beta
+    
+    # V_beta = tau * W^T W + Sigma_beta^{-1}
+    V_beta <- s_beta_inv + model$tau * (t(W) %*% W)
+    
+    # W^T Y
+    tWY <- (t(W)%*%Y)[, 1]
+    
+    # tau * W^T Y + Sigma_beta^{-1} beta_0
+    mu_beta_num <- model$tau * tWY + beta_prior_num
+    
+    # V_beta^{-1}
+    V_beta_inv <- inverse(V_beta)
+    
+    # mu_beta = V_beta^{-1} mu_beta_num
+    mu_beta <- (V_beta_inv %*% mu_beta_num)[, 1]
+    
+    ## joint gibbs draw
+    V_beta_cholesky <- chol(V_beta)
+    
+    beta_new <- rmnorm_chol(1, mean = mu_beta,
+                            cholesky = V_beta_cholesky, prec_param = TRUE)
+    model[[target]] <<- beta_new
+    
+    ## update dependencies
+    model$calculate(calcNodes)
+    copy(
+      from = model, 
+      to = mvSaved, 
+      row = 1,
+      nodes = calcNodes, 
+      logProb = TRUE
+    )
+  },
+  
+  methods = list(reset = function() {})
+)
+```
+
+```{r}
+sampler = "slice"
+
+joint_conf <- make_conf(joint_model,
+                        sampler,
+                        pz = pz,
+                        L = L,
+                        vars = joint_vars,
+                        nobs = joint_nimble_constants[["nobs"]], 
+                        ncen = joint_nimble_constants[["ncen"]])
+
+vars_to_monitor <- c("beta", "tau")
+fit <- run_sampler(joint_model,
+                   sampler_type = as.character(sampler),
+                   pz = pz,
+                   L = L,
+                   niter = config[["niter"]],
+                   nburnin = config[["nburnin"]],
+                   thin = config[["thin"]],
+                   vars_to_monitor = vars_to_monitor,
+                   nobs = joint_nimble_constants[["nobs"]], 
+                   ncen = joint_nimble_constants[["ncen"]]
+                   )
+
+
+beta_cols <- grep(
+  '^beta\\[[0-9]+\\]$',
+  colnames(fit$samples)
+)
+
+colnames(fit$samples)[beta_cols] <- c(
+  'betax',
+  paste0('betaz[', seq_len(pz), ']')
+)
+
+samples_matrix <- as.matrix(fit$samples)
+  
+## occupied clusters
+xi_cols <- grep("^xi\\[", colnames(samples_matrix))
+occupied <- apply(samples_matrix[, xi_cols, drop = FALSE],
+                  1,
+                  function(x) length(unique(x)))
+
+## parameter summaries
+samples <- fit$samples
+samples_mcmc <- coda::as.mcmc(samples)
+
+parameter <- colnames(samples)
+truth_values <- c(0.7, 0, 1, -1, 1)
+
+post_mean <- colMeans(samples)
+post_sd <- apply(samples, 2, sd)
+post_median <- apply(samples, 2, median)
+
+ess <- as.numeric(coda::effectiveSize(samples_mcmc))
+hpd <- coda::HPDinterval(samples_mcmc, prob = 0.95)
+
+tibble::tibble(
+  sampler = sampler_name,
+  parameter = parameter,
+  truth = truth_values,
+  mean = post_mean,
+  sd = post_sd,
+  median = post_median,
+  hpd_lower = hpd[, 'lower'],
+  hpd_upper = hpd[, 'upper'],
+  ess = ess,
+  mcse = post_sd / sqrt(ess),
+  runtime = runtime,
+  ess_sec = ess / runtime,
+  squared_error = (post_mean - truth_values)^2,
+  covered = (truth_values >= hpd[, 'lower'] &
+    truth_values <= hpd[, 'upper']),
+  mean_occupied = mean(occupied),
+  sd_occupied = sd(occupied),
+  median_occupied = median(occupied),
+  min_occupied = min(occupied),
+  max_occupied = max(occupied)
+)
+```
+```{r}
+data <- datagen(n = sim_grid_filt[["n"]][i],
+                p_z2 = 0.8, 
+                mu_z3 = 2, 
+                sd_z3 = 1,
+                comps = 3, 
+                w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, 
+                beta_z = c(0,1,-1), 
+                tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = alpha_start, 
+                alpha_width = alpha_width,
+                sigma_start = 30, 
+                sigma_width = 0.15,
+                rho = c(0.85, 0.9, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = sim_grid_filt[["eps_obs"]][i])
+
+data$CL <- data$CR <- data$X
+data$Dobs <- rep(1, sim_grid_filt[["n"]][i])
+data$DL <- data$DR <- rep(0, sim_grid_filt[["n"]][i])
+
+
+data$CL[1] <- data$X[1] - 10
+data$CR[1] <- data$X[1] + 10
+data$Dobs[1] <- 0
+
+data$CL[2] <- data$X[2] - 10
+data$CR[2] <- data$X[2] + 10
+data$Dobs[2] <- 0
+
+joint_nimble_constants <- nimble_constants(data,
+                               L = config[["L"]], pz = pz,
+                               sigma_bx = sigma_bx,
+                               sigma_bz = sigma_bz,
+                               mu_gamma = mu_gamma)
+
+joint_nimble_data <- nimble_data_years(data,
+                           constants = joint_nimble_constants)
+joint_nimble_inits <- nimble_inits(data,
+                       pz = pz,
+                       constants = joint_nimble_constants,
+                       Ndata = joint_nimble_data)
+
+joint_model <- nimbleModel(
+  code = joint_model_code,
+  data = joint_nimble_data,
+  constants = joint_nimble_constants,
+  inits = joint_nimble_inits
+)
+
+fit <- run_sampler(joint_model,
+                   sampler_type = as.character(sampler),
+                   pz = pz,
+                   L = L,
+                   niter = config[["niter"]],
+                   nburnin = config[["nburnin"]],
+                   thin = config[["thin"]],
+                   vars_to_monitor = vars_to_monitor,
+                   nobs = joint_nimble_constants[["nobs"]], 
+                   ncen = joint_nimble_constants[["ncen"]]
+                   )
+```
+
