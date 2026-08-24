@@ -8,8 +8,9 @@
 # This script will call all other static R functions and source files found in P1/R/
 
 config <- list(
-  project_dir = '/work/users/a/g/agfoes/P1',
-  run_name = 'expanded_rep_sims_08022026',
+  #project_dir = '/work/users/a/g/agfoes/P1',
+  project_dir = "~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1",
+  run_name = 'custom_sampler_test',
   
   pz = 3, # dimension of fully observed covariate vector (matching datagen specification)
   sigma_bx = 1, # prior sd

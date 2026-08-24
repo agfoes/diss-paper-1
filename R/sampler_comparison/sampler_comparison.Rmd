@@ -14,7 +14,8 @@ library(tidyverse)
 library(nimbleNoBounds)
 
 ## source helper functions
-dir <- "/work/users/a/g/agfoes/P1"
+#dir <- "/work/users/a/g/agfoes/P1"
+dir <- "~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1"
 source(paste0(dir, "/R/sampler_comparison/config_sampler_comparison.R"))                # config
 source(paste0(dir, "/R/helpers/helpers_data.R"))                                        # find_L, datagen
 source(paste0(dir, "/R/helpers/helpers_nimble.R"))                                      # nimble_constants, nimble_data_years, nimble_inits
@@ -143,7 +144,7 @@ joint_vars <- c("beta", "tau")
 
 set.seed(as.numeric(config[["sim_seed"]]) + 1000000 + sim_id*1000)
 
-sampler <- "default"
+sampler <- "custom_joint"
 uni_conf <- make_conf_univariate(uni_model, 
                                 sampler, 
                                 pz = pz, L = L, 
@@ -152,7 +153,9 @@ uni_conf <- make_conf_univariate(uni_model,
 joint_conf <- make_conf(joint_model,
                         sampler,
                         pz = pz, L = L,
-                        vars = joint_vars)
+                        vars = joint_vars,
+                        nobs = joint_nimble_constants$nobs,
+                        ncen = joint_nimble_constants$ncen)
 ```
 
 ```{r}
@@ -330,6 +333,9 @@ tibble::tibble(
   max_occupied = max(occupied)
 )
 ```
+
+
+
 ```{r}
 data <- datagen(n = sim_grid_filt[["n"]][i],
                 p_z2 = 0.8, 
@@ -381,6 +387,13 @@ joint_nimble_inits <- nimble_inits(data,
                        pz = pz,
                        constants = joint_nimble_constants,
                        Ndata = joint_nimble_data)
+
+joint_model <- nimbleModel(
+  code = joint_model_code,
+  data = joint_nimble_data,
+  constants = joint_nimble_constants,
+  inits = joint_nimble_inits
+)
 
 joint_model <- nimbleModel(
   code = joint_model_code,

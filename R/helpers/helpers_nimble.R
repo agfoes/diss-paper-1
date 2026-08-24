@@ -111,7 +111,7 @@ nimble_inits <- function(data, pz, constants, Ndata) {
     
     xi = sample(1:L, length(data$Y), replace = TRUE),
     
-    x_cen = x_cen,
+    #x_cen = x_cen,
     
     v = rbeta(L - 1, 1, 1)
   )

@@ -16,7 +16,7 @@ sampler_beta_conjugate_block <- nimbleFunction(
     s_beta_inv <- inverse(model$beta_cov[1:p_beta, 1:p_beta])
     
     # fixed contribution of prior hypterparameters on posterior mean: Sigma_{beta}^{-1} * beta_0
-    beta_prior_num <- (s_beta_inv %>% model$beta_mean[1:p_beta])[, 1]
+    beta_prior_num <- (s_beta_inv %*% asCol(model$beta_mean[1:p_beta]))
     
     # recalculate nodes depending on changes in beta
     calcNodes <- model$getDependencies(target)
@@ -60,25 +60,27 @@ sampler_beta_conjugate_block <- nimbleFunction(
     ## full conditional for beta
     
     # V_beta = tau * W^T W + Sigma_beta^{-1}
-    V_beta <- s_beta_inv + model$tau * (t(W) %*% W)
+    V_beta <- s_beta_inv + model$tau[1] * (t(W) %*% W)
     
     # W^T Y
-    tWY <- (t(W)%*%Y)[, 1]
+    tWY <- (t(W)%*%Y)
     
     # tau * W^T Y + Sigma_beta^{-1} beta_0
-    mu_beta_num <- model$tau * tWY + beta_prior_num
+    mu_beta_num <- model$tau[1] * tWY + beta_prior_num
     
     # V_beta^{-1}
     V_beta_inv <- inverse(V_beta)
     
     # mu_beta = V_beta^{-1} mu_beta_num
-    mu_beta <- (V_beta_inv %*% mu_beta_num)[, 1]
+    mu_beta <- (V_beta_inv %*% mu_beta_num)
     
     ## joint gibbs draw
     V_beta_cholesky <- chol(V_beta)
     
-    beta_new <- rmnorm_chol(1, mean = mu_beta,
-                            cholesky = V_beta_cholesky, prec_param = TRUE)
+    beta_new <- rmnorm_chol(1, 
+                            mean = mu_beta[, 1],
+                            cholesky = V_beta_cholesky, 
+                            prec_param = TRUE)
     model[[target]] <<- beta_new
     
     ## update dependencies

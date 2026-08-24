@@ -6,7 +6,8 @@
 
 library(dplyr)
 
-dir <- "/work/users/a/g/agfoes/P1"
+#dir <- "/work/users/a/g/agfoes/P1"
+dir <- "~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1"
 source(paste0(dir, "/R/config_normal.R"))                                       # config
 
 result_dir <- file.path(

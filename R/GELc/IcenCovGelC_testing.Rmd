@@ -1,0 +1,88 @@
+---
+title: "ICenCov Testing"
+author: "Abby Foes"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+#remotes::install_github(
+#  'atoloba/ICenCov',
+#  ref = 'paper-2026',
+#  auth_token = NULL
+#)
+
+library(ICenCov)
+```
+
+# logreg example
+```{r}
+data(carotenoids)
+
+dcaro <- subset(carotenoids, !is.na(diabetes))
+
+# fit logreg
+fit1 <- icglm(diabetes ~ sex + bmi + ic(zl, zr, "caro"), family = binomial,
+              data = dcaro, Lin = TRUE,
+              Rin = with(dcaro, zl == zr))
+
+summary(fit1)
+```
+
+# normal example
+```{r}
+fit_norm <- icglm(diabetes ~ sex + bmi + ic(zl, zr, "caro"), family = gaussian,
+                  data = dcaro, Lin = TRUE, 
+                  Rin = with(dcaro, zl == zr))
+summary(fit_norm)
+```
+
+# my DGP
+```{r}
+data <- datagen()
+vars <- c("Y", "X", "CL", "CR", "Z1", "Z2", "Z3", "Dobs", "DR", "DL")
+datafit <- as.data.frame(data[vars])
+
+nconstants <- nimble_constants(data, pz = 3)
+ndata <- nimble_data_years(data, nconstants)
+ninits <- nimble_inits(data, 3, nconstants, ndata)
+
+midz <- numeric(100)
+midz[nconstants$idx_cen] <- ninits[["x_cen"]]
+midz[nconstants$idx_obs] <- ndata[["x_obs"]]
+
+
+glm0 <- glm(
+  Y ~ -1 + Z1 + Z2 + Z3 + midz,
+  family = gaussian,
+  data = datafit
+)
+
+start <- c(
+  coef(glm0),
+  summary(glm0)$dispersion
+)
+
+Lin <- datafit$Dobs == 1
+Rin <- datafit$DR == 1
+
+datafit$CR_finite = datafit$CR
+datafit$CR_finite[is.infinite(datafit$CR) & datafit$CR > 0] <- max(datafit$CR[is.finite(datafit$CR)]) + 1000
+```
+
+
+```{r}
+
+data_int_only <- datafit %>%
+  filter(Dobs == 0 & DL == 0 & DR == 0)
+
+fit_me <- icglm(Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, "X"), family = gaussian,
+                data = data_int_only)
+
+summary(fit_me)
+
+
+
+```
+
+

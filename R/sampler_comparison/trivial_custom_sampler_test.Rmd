@@ -3,15 +3,17 @@ title: "custom_sampler_test"
 output: html_document
 ---
 
-The purpose of this script is to use a trivial regression scenario to test the custom joint conjugate sampler created for P1. 
+The purpose of this script is to use a trivial regression scenario to test the custom joint conjugate sampler created for P1. This simulation will not use a DPMM model for the covariates. 
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 library(nimble)
 library(truncnorm)
 library(coda)
 library(tidyverse)
 library(nimbleNoBounds)
 ```
+
+
 ```{r}
 sampler_beta_conjugate_block_obs_test <- nimbleFunction(
   contains = sampler_BASE,
@@ -29,12 +31,9 @@ sampler_beta_conjugate_block_obs_test <- nimbleFunction(
       model$beta_cov[1:p_beta, 1:p_beta]
     )
 
-    beta_prior_num <- (
-      s_beta_inv %*% model$beta_mean[1:p_beta]
-    )[, 1]
+    beta_prior_num <- (s_beta_inv %*% asCol(model$beta_mean[1:p_beta])) # p_beta x 1 matrix (p_beta vector)
 
-    betaNodes <- model$expandNodeNames(target, returnScalarComponents = TRUE)
-    calcNodes <- model$getDependencies(betaNodes)
+    calcNodes <- model$getDependencies(target)
   },
 
   run = function() {
@@ -55,35 +54,30 @@ sampler_beta_conjugate_block_obs_test <- nimbleFunction(
         Y[k] <- model$y_obs[k]
       }
     }
+    ## temporarily no censored subjects
+    
+    V_beta <- s_beta_inv + model$tau[1] * (t(W) %*% W) # p_beta x p_beta + p_beta x p_beta = p_beta x p_beta
 
-    ## no censored-subject code here
+    tWY <- (t(W) %*% Y) # should be p_beta x 1 matrix (p_beta vector)
 
-    V_beta <- s_beta_inv +
-      model$tau * (t(W) %*% W)
+    mu_beta_num <- (model$tau[1] * tWY + (beta_prior_num)) # p_beta vector + p_beta vector
+    
+    V_beta_inv <- inverse(V_beta) # p_beta x p_beta
 
-    tWY <- (t(W) %*% Y)[, 1]
-
-    mu_beta_num <-
-      model$tau * tWY +
-      beta_prior_num
-
-    V_beta_inv <- inverse(V_beta)
-
-    mu_beta <- (
-      V_beta_inv %*% mu_beta_num
-    )[, 1]
-
+    mu_beta <- (V_beta_inv %*% (mu_beta_num)) # p_beta vector
+    
+    ## draws
     V_beta_cholesky <- chol(V_beta)
 
     beta_new <- rmnorm_chol(
       1,
-      mean = mu_beta,
+      mean = mu_beta[, 1],
       cholesky = V_beta_cholesky,
       prec_param = TRUE
     )
 
     
-    values(model, betaNodes) <<- beta_new
+    model[[target]] <<- beta_new
 
     model$calculate(calcNodes)
 
@@ -102,7 +96,7 @@ sampler_beta_conjugate_block_obs_test <- nimbleFunction(
 )
 ```
 
-
+# data gen and nimble code
 ```{r}
 n = 1000
 
@@ -115,7 +109,7 @@ cov = cbind(X, Z1, Z2, Z3)
 
 # gen Y
 truth <- c(0.7, 1, -1, 2)
-Y <- cov %*% truth + rnorm(n, mean = 0, sd = 0.5)
+Y <- cov %*% truth + rnorm(n, mean = 0, sd = 1)
 
 code <- nimbleCode({
 
@@ -146,7 +140,10 @@ data <- list(y_obs = Y[, 1],
              z_obs = cov[, 2:4])
 inits <- list(tau = 1,
               beta = c(1, 1, 1, 1))
+```
 
+
+```{r}
 mod <- nimbleModel(code = code,
                    data = data,
                    inits = inits,
@@ -154,16 +151,18 @@ mod <- nimbleModel(code = code,
 
 conf <- configureMCMC(mod, useConjugacy = TRUE)
 conf$removeSampler("beta")
-conf$addSampler(target = "beta", type = sampler_beta_conjugate_block_obs_test,
+conf$addSampler(target = "beta", 
+                type = sampler_beta_conjugate_block_obs_test,
                 control = list(p = 3, nobs = 1000, ncen = 0))
+conf$printSamplers()
 
 mcmc <- buildMCMC(conf)
 Cmodel <- compileNimble(mod)
-Cmcmc <- compileNimble(mcmc, project = Cmodel, showCompilerOutput = TRUE)
+Cmcmc <- compileNimble(mcmc, project = Cmodel)
 samples <- runMCMC(
     Cmcmc,
-    niter = 10000,
-    nburnin = 4000,
+    niter = 100000,
+    nburnin = 40000,
     thin = 1,
     nchains = 1,
     samplesAsCodaMCMC = TRUE
