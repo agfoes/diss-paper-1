@@ -2,10 +2,9 @@
 # R / RStudio
 # ============================================================
 
-.Rproj.user/
+.Rproj.user
 .Rhistory
 .RData
-.Ruserdata
 
 # R package / temporary files
 .Rcheck/
@@ -43,6 +42,8 @@ slurm-*.err
 # ============================================================
 # Temporary / backup files
 # ============================================================
+
+archive/
 
 *~
 *.tmp
