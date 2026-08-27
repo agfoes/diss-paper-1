@@ -15,7 +15,7 @@ output: html_document
 library(ICenCov)
 ```
 
-# logreg example
+# GELc logreg example
 ```{r}
 data(carotenoids)
 
@@ -29,7 +29,7 @@ fit1 <- icglm(diabetes ~ sex + bmi + ic(zl, zr, "caro"), family = binomial,
 summary(fit1)
 ```
 
-# normal example
+# GELc normal example
 ```{r}
 fit_norm <- icglm(diabetes ~ sex + bmi + ic(zl, zr, "caro"), family = gaussian,
                   data = dcaro, Lin = TRUE, 
@@ -39,50 +39,166 @@ summary(fit_norm)
 
 # my DGP
 ```{r}
-data <- datagen()
+
+data <- datagen(gamma = matrix(c(0, 0, 0, 
+                                 0, 0, 0, 
+                                 0, 0, 0), 
+                                   nrow = 3, byrow = TRUE))
 vars <- c("Y", "X", "CL", "CR", "Z1", "Z2", "Z3", "Dobs", "DR", "DL")
 datafit <- as.data.frame(data[vars])
 
-nconstants <- nimble_constants(data, pz = 3)
-ndata <- nimble_data_years(data, nconstants)
-ninits <- nimble_inits(data, 3, nconstants, ndata)
+datafit$CR_raw = datafit$CR
+datafit$CR[is.infinite(datafit$CR_raw)] <- 10000
 
-midz <- numeric(100)
-midz[nconstants$idx_cen] <- ninits[["x_cen"]]
-midz[nconstants$idx_obs] <- ndata[["x_obs"]]
+datafit$CL_raw = datafit$CL
+datafit$CL[is.infinite(datafit$CL_raw)] <- -10000
 
+datafit$CL[1] <- datafit$CR[1] <- datafit$X[1]
+datafit$Dobs[1] <- 1
+datafit$DL[1] <- datafit$DR[1] <- 0
 
-glm0 <- glm(
-  Y ~ -1 + Z1 + Z2 + Z3 + midz,
-  family = gaussian,
-  data = datafit
-)
-
-start <- c(
-  coef(glm0),
-  summary(glm0)$dispersion
-)
-
-Lin <- datafit$Dobs == 1
-Rin <- datafit$DR == 1
-
-datafit$CR_finite = datafit$CR
-datafit$CR_finite[is.infinite(datafit$CR) & datafit$CR > 0] <- max(datafit$CR[is.finite(datafit$CR)]) + 1000
 ```
-
 
 ```{r}
 
-data_int_only <- datafit %>%
-  filter(Dobs == 0 & DL == 0 & DR == 0)
-
-fit_me <- icglm(Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, "X"), family = gaussian,
-                data = data_int_only)
+fit_me <- icglm(Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, "X"), 
+                family = gaussian,
+                data = datafit)
 
 summary(fit_me)
 
+## get nimble constants, data, inits for joint model code
+pz <- config[["pz"]]
+sigma_bx <- config[["sigma_bx"]]
+sigma_bz <- config[["sigma_bz"]]
+mu_gamma <- config[["mu_gamma"]]
+L <- config[["L"]]
 
+## joint model code
+joint_nimble_constants <- nimble_constants(datafit,
+                               L = config[["L"]], pz = pz,
+                               sigma_bx = sigma_bx,
+                               sigma_bz = sigma_bz,
+                               mu_gamma = mu_gamma)
+includeObs = TRUE
+includeCen = TRUE
+
+joint_nimble_data <- nimble_data_years(datafit,
+                           constants = joint_nimble_constants)
+joint_nimble_inits <- nimble_inits(datafit,
+                       pz = pz,
+                       constants = joint_nimble_constants,
+                       Ndata = joint_nimble_data)
+
+joint_model_code <- source("~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1/R/model_code/model_normal_joint_betas.R")$value
+joint_model <- nimbleModel(
+  code = joint_model_code,
+  data = joint_nimble_data,
+  constants = joint_nimble_constants,
+  inits = joint_nimble_inits
+)
+
+fit <- run_sampler(joint_model,
+                   sampler_type = "custom_joint",
+                   pz = pz,
+                   L = L,
+                   niter = config[["niter"]],
+                   nburnin = config[["nburnin"]],
+                   thin = config[["thin"]],
+                   vars_to_monitor = c("beta", "tau"),
+                   nobs = joint_nimble_constants[["nobs"]], 
+                   ncen = joint_nimble_constants[["ncen"]]
+                   )
+posterior_summaries <- posterior_summary(
+      samples = fit$samples,
+      sampler_name = "custom_joint",
+      truth = c(0.7, 0, 1, -1, 1),
+      key_vars = config[["key_vars"]],
+      runtime = fit$runtime
+    ) %>%
+      mutate(
+        sim_id = sim_id,
+        .before = 1
+      )
+```
+
+# simpler dataset - minimal censoring
+```{r}
+lowcendata <- datagen(
+  n = 1000,
+  p_z2 = 0.8, mu_z3 = 5, sd_z3 = 1,
+  comps = 3, w = c(0.3, 0.5, 0.2),
+  gamma = matrix(c(0, 0, 0, 0, 0, 0, 0, 0, 0), nrow = 3, byrow = TRUE),
+  x_sd = c(0.5, 1, 1)*365.25,
+  beta_x = 0.7/365.25,
+  beta_z = c(0, 1, -1), tau = 1,
+  alpha_start = c(-100, 0, 0),
+  alpha_width = c(log(1100), 2, -0.2),
+  eps_obs = 1000
+)
+vars <- c("Y", "X", "CL", "CR", "Z1", "Z2", "Z3", "Dobs", "DR", "DL")
+lowcendata_fit <- as.data.frame(lowcendata[vars])
+colMeans(lowcendata_fit)
+
+lowcendata_fit$CL[lowcendata_fit$DL == 1] <- -5000
+lowcendata_fit$CR[lowcendata_fit$DR == 1] <- 5000
 
 ```
 
+```{r}
+## joint model code
+joint_nimble_constants <- nimble_constants(lowcendata_fit,
+                               L = config[["L"]], pz = pz,
+                               sigma_bx = sigma_bx,
+                               sigma_bz = sigma_bz,
+                               mu_gamma = mu_gamma)
+includeObs = TRUE
+includeCen = TRUE
+
+joint_nimble_data <- nimble_data_years(lowcendata_fit,
+                           constants = joint_nimble_constants)
+joint_nimble_inits <- nimble_inits(lowcendata_fit,
+                       pz = pz,
+                       constants = joint_nimble_constants,
+                       Ndata = joint_nimble_data)
+
+joint_model_code <- source("~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1/R/model_code/model_normal_joint_betas.R")$value
+joint_model <- nimbleModel(
+  code = joint_model_code,
+  data = joint_nimble_data,
+  constants = joint_nimble_constants,
+  inits = joint_nimble_inits
+)
+
+fit <- run_sampler(joint_model,
+                   sampler_type = "custom_joint",
+                   pz = pz,
+                   L = L,
+                   niter = config[["niter"]],
+                   nburnin = config[["nburnin"]],
+                   thin = config[["thin"]],
+                   vars_to_monitor = c("beta", "tau"),
+                   nobs = joint_nimble_constants[["nobs"]], 
+                   ncen = joint_nimble_constants[["ncen"]]
+                   )
+posterior_summaries <- posterior_summary(
+      samples = fit$samples,
+      sampler_name = "custom_joint",
+      truth = c(0.7, 0, 1, -1, 1),
+      key_vars = config[["key_vars"]],
+      runtime = fit$runtime
+    ) %>%
+      mutate(
+        sim_id = sim_id,
+        .before = 1
+      )
+posterior_summaries
+
+
+fit_me <- icglm(Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, "X"), 
+                family = gaussian,
+                data = lowcendata_fit)
+
+summary(fit_me)
+```
 

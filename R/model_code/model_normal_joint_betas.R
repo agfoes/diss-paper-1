@@ -27,7 +27,7 @@ model_code <- nimbleCode({
   }
   
   ### subject-level model
-  if (nobs > 0) {
+  if (includeObs) {
     for (k in 1:nobs) {
       
       # cluster assignment
@@ -52,9 +52,9 @@ model_code <- nimbleCode({
         tau = tau
       )
     }
-  }
+  } else {no_obs <- 0}
   
-  if (ncen > 0) {
+  if (includeCen) {
     for (k in 1:ncen) {
       
       # cluster assignment
@@ -84,5 +84,5 @@ model_code <- nimbleCode({
         tau = tau
       )
     }
-  }
+  } else {no_cen <- 0}
 })

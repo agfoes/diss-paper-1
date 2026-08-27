@@ -25,6 +25,17 @@ nimble_constants <- function(data,
   
   cov_beta = diag(c(sigma_bz, sigma_bz), (pz+1))
   
+  idx_obs = which(data$Dobs == 1)
+  idx_cen = which(data$Dobs == 0)
+  
+  # pad idx_cen/obs if they only have one entry - nimble doesn't like length-one vectors and it doesn't matter bc idx are always indexed, so the added entries aren't ever accessed
+  if (length(idx_obs) < 2) {
+    idx_obs <- c(idx_obs, rep(1, 2 - length(idx_obs)))
+  }
+  if (length(idx_cen) == 1) {
+    idx_cen <- c(idx_cen, rep(1, 2 - length(idx_cen)))
+  }
+  
   return(list(
     L = L,
     p = pz,
@@ -35,8 +46,8 @@ nimble_constants <- function(data,
     mu_gamma = mu_gamma,
     nobs = sum(data$Dobs),
     ncen = length(data$Y) - sum(data$Dobs),
-    idx_obs = which(data$Dobs == 1),
-    idx_cen = which(data$Dobs == 0)
+    idx_obs = idx_obs,
+    idx_cen = idx_cen
   ))
 }
 
