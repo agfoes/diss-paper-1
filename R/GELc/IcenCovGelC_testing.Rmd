@@ -13,6 +13,9 @@ output: html_document
 #)
 
 library(ICenCov)
+library(tidyverse)
+library(nimble)
+library(nimbleNoBounds)
 ```
 
 # GELc logreg example
@@ -20,6 +23,7 @@ library(ICenCov)
 data(carotenoids)
 
 dcaro <- subset(carotenoids, !is.na(diabetes))
+dcaro <- subset(dcaro, !is.na(glucose))
 
 # fit logreg
 fit1 <- icglm(diabetes ~ sex + bmi + ic(zl, zr, "caro"), family = binomial,
@@ -31,14 +35,21 @@ summary(fit1)
 
 # GELc normal example
 ```{r}
-fit_norm <- icglm(diabetes ~ sex + bmi + ic(zl, zr, "caro"), family = gaussian,
+fit_norm <- icglm(glucose ~ sex + bmi + ic(zl, zr, "caro"), family = gaussian,
                   data = dcaro, Lin = TRUE, 
                   Rin = with(dcaro, zl == zr))
 summary(fit_norm)
 ```
 
+
 # my DGP
 ```{r}
+source("~/R/model_code/model_normal_joint_betas.R") #change as needed
+source("~/R/helpers/helpers_data.R")
+source("~/R/helpers/helpers_nimble.R")
+source("~/R/helpers/helpers_sampler.R")
+source("~/R/helpers/helpers_summary.R")
+
 
 data <- datagen(gamma = matrix(c(0, 0, 0, 
                                  0, 0, 0, 
@@ -53,6 +64,7 @@ datafit$CR[is.infinite(datafit$CR_raw)] <- 10000
 datafit$CL_raw = datafit$CL
 datafit$CL[is.infinite(datafit$CL_raw)] <- -10000
 
+# force first subject to be observed
 datafit$CL[1] <- datafit$CR[1] <- datafit$X[1]
 datafit$Dobs[1] <- 1
 datafit$DL[1] <- datafit$DR[1] <- 0
@@ -60,28 +72,30 @@ datafit$DL[1] <- datafit$DR[1] <- 0
 ```
 
 ```{r}
-
+# fit GELc on above dataset (-1 because Z1 is an intercept)
 fit_me <- icglm(Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, "X"), 
                 family = gaussian,
                 data = datafit)
 
 summary(fit_me)
+```
+
+```{r}
+# fit P1 to above dataset
 
 ## get nimble constants, data, inits for joint model code
-pz <- config[["pz"]]
-sigma_bx <- config[["sigma_bx"]]
-sigma_bz <- config[["sigma_bz"]]
-mu_gamma <- config[["mu_gamma"]]
-L <- config[["L"]]
+pz <- 3
+sigma_bx <- 1
+sigma_bz <- 1
+mu_gamma <- 0
+L <- 50
 
 ## joint model code
 joint_nimble_constants <- nimble_constants(datafit,
-                               L = config[["L"]], pz = pz,
+                               L = L, pz = pz,
                                sigma_bx = sigma_bx,
                                sigma_bz = sigma_bz,
                                mu_gamma = mu_gamma)
-includeObs = TRUE
-includeCen = TRUE
 
 joint_nimble_data <- nimble_data_years(datafit,
                            constants = joint_nimble_constants)
@@ -90,7 +104,12 @@ joint_nimble_inits <- nimble_inits(datafit,
                        constants = joint_nimble_constants,
                        Ndata = joint_nimble_data)
 
+# source joint model code to custom name 
 joint_model_code <- source("~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1/R/model_code/model_normal_joint_betas.R")$value
+
+includeObs <- TRUE
+includeCen <- TRUE
+
 joint_model <- nimbleModel(
   code = joint_model_code,
   data = joint_nimble_data,
@@ -102,9 +121,9 @@ fit <- run_sampler(joint_model,
                    sampler_type = "custom_joint",
                    pz = pz,
                    L = L,
-                   niter = config[["niter"]],
-                   nburnin = config[["nburnin"]],
-                   thin = config[["thin"]],
+                   niter = 100000,
+                   nburnin = 40000,
+                   thin = 1,
                    vars_to_monitor = c("beta", "tau"),
                    nobs = joint_nimble_constants[["nobs"]], 
                    ncen = joint_nimble_constants[["ncen"]]
@@ -113,7 +132,7 @@ posterior_summaries <- posterior_summary(
       samples = fit$samples,
       sampler_name = "custom_joint",
       truth = c(0.7, 0, 1, -1, 1),
-      key_vars = config[["key_vars"]],
+      key_vars = c("beta", "tau"),
       runtime = fit$runtime
     ) %>%
       mutate(
@@ -143,12 +162,24 @@ colMeans(lowcendata_fit)
 lowcendata_fit$CL[lowcendata_fit$DL == 1] <- -5000
 lowcendata_fit$CR[lowcendata_fit$DR == 1] <- 5000
 
+range(lowcendata_fit$X)
+range(lowcendata_fit$CL)
+range(lowcendata_fit$CR)
+
+mean(lowcendata_fit$Dobs)
+mean(lowcendata_fit$DL)
+mean(lowcendata_fit$DR)
+
+lm(Y ~ -1 + Z1 + Z2 + Z3 + X, data = lowcendata_fit)
+
+0.7 / 365.25
+
 ```
 
 ```{r}
 ## joint model code
 joint_nimble_constants <- nimble_constants(lowcendata_fit,
-                               L = config[["L"]], pz = pz,
+                               L = 50, pz = pz,
                                sigma_bx = sigma_bx,
                                sigma_bz = sigma_bz,
                                mu_gamma = mu_gamma)
@@ -163,6 +194,7 @@ joint_nimble_inits <- nimble_inits(lowcendata_fit,
                        Ndata = joint_nimble_data)
 
 joint_model_code <- source("~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1/R/model_code/model_normal_joint_betas.R")$value
+
 joint_model <- nimbleModel(
   code = joint_model_code,
   data = joint_nimble_data,
@@ -174,9 +206,9 @@ fit <- run_sampler(joint_model,
                    sampler_type = "custom_joint",
                    pz = pz,
                    L = L,
-                   niter = config[["niter"]],
-                   nburnin = config[["nburnin"]],
-                   thin = config[["thin"]],
+                   niter = 100000,
+                   nburnin = 40000,
+                   thin = 1,
                    vars_to_monitor = c("beta", "tau"),
                    nobs = joint_nimble_constants[["nobs"]], 
                    ncen = joint_nimble_constants[["ncen"]]
@@ -185,7 +217,7 @@ posterior_summaries <- posterior_summary(
       samples = fit$samples,
       sampler_name = "custom_joint",
       truth = c(0.7, 0, 1, -1, 1),
-      key_vars = config[["key_vars"]],
+      key_vars = c("beta", "tau"),
       runtime = fit$runtime
     ) %>%
       mutate(
@@ -200,5 +232,183 @@ fit_me <- icglm(Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, "X"),
                 data = lowcendata_fit)
 
 summary(fit_me)
+```
+
+# fit gelc oracle model
+```{r}
+gelc_oracle_data <- lowcendata_fit
+
+gelc_oracle_data$CL <- gelc_oracle_data$X
+gelc_oracle_data$CR <- gelc_oracle_data$X
+
+fit_gelc_oracle <- icglm(
+  Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, 'X'),
+  family = gaussian,
+  data = gelc_oracle_data
+)
+summary(fit_gelc_oracle)
+```
+
+# smaller bounds gelc
+```{r}
+gelc_small_bounds_data <- lowcendata_fit
+
+gelc_small_bounds_data$CL <- gelc_small_bounds_data$X - 1000
+gelc_small_bounds_data$CR <- gelc_small_bounds_data$X + 1000
+
+fit_gelc_small_bounds <- icglm(
+  Y ~ -1 + Z1 + Z2 + Z3 + ic(CL, CR, 'X'),
+  family = gaussian,
+  data = gelc_small_bounds_data
+)
+
+
+summary(fit_gelc_small_bounds)
+```
+
+# simple DGP, X independent of Z, both models
+```{r}
+set.seed(123)
+
+n <- 300
+
+## true censored covariate
+X <- rexp(n, rate = 1 / 12)
+
+## outcome
+beta0 <- 2
+betax <- 0.1
+sigma <- 1
+
+Y <- beta0 + betax * X + rnorm(n, 0, sigma)
+
+## finite interval censoring
+## use width 3, matching the narrowest GELc simulation setting
+width <- 6
+
+CL <- floor(X / width) * width
+CR <- CL + width
+
+## fully observed covariate
+Z1 <- rep(1, n)
+Z2 <- rnorm(n)
+
+
+testdata <- data.frame(
+  Y = Y,
+  X = X,
+  Z1 = Z1,
+  Z2 = Z2,
+  CL = CL,
+  CR = CR,
+  Dobs = 0,
+  DL = 0,
+  DR = 0
+)
+
+## force one exactly observed subject
+testdata$CL[1] <- testdata$X[1]
+testdata$CR[1] <- testdata$X[1]
+testdata$Dobs[1] <- 1
+```
+
+## fit GELc
+```{r}
+fit_gelc <- icglm(
+  Y ~ Z2 + ic(CL, CR, 'X'),
+  family = gaussian,
+  data = testdata
+)
+
+summary(fit_gelc)
+```
+
+## fit P1
+```{r}
+## ------------------------------------------------------------
+## Bayesian fit
+## ------------------------------------------------------------
+
+pz <- 2
+L <- 25
+Z <- as.matrix(testdata[, c("Z1", "Z2")])
+
+## indices
+idx_obs <- which(testdata$Dobs == 1)
+idx_cen <- which(testdata$Dobs == 0)
+
+nobs <- length(idx_obs)
+ncen <- length(idx_cen)
+
+## keep your padding convention for NIMBLE
+if(length(idx_obs) < 2) {
+  idx_obs <- c(idx_obs, rep(1L, 2 - length(idx_obs)))
+}
+
+if(length(idx_cen) < 2) {
+  idx_cen <- c(idx_cen, rep(1L, 2 - length(idx_cen)))
+}
+
+constants <- list(
+  L = L,
+  p = pz,
+  mu_gamma = 0,
+  nobs = nobs,
+  ncen = ncen,
+  idx_obs = idx_obs,
+  idx_cen = idx_cen,
+  beta_mean = rep(0, pz + 1),
+  beta_cov = diag(pz + 1)
+)
+
+Ndata <- list(
+  y_obs = testdata$Y[testdata$Dobs == 1],
+  y_cen = testdata$Y[testdata$Dobs == 0],
+
+  z_obs = Z[testdata$Dobs == 1, , drop = FALSE],
+  z_cen = Z[testdata$Dobs == 0, , drop = FALSE],
+
+  x_obs = testdata$X[testdata$Dobs == 1],
+
+  CL = testdata$CL[testdata$Dobs == 0],
+  CR = testdata$CR[testdata$Dobs == 0],
+
+  constraint_data = rep(1, ncen)
+)
+
+includeObs <- nobs > 0
+includeCen <- ncen > 0
+
+joint_model_code <- source("~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1/R/model_code/model_normal_joint_betas.R")$value
+
+inits <- nimble_inits(
+  data = testdata,
+  pz = pz,
+  constants = constants,
+  Ndata = Ndata
+)
+
+model <- nimbleModel(
+  code = joint_model_code,
+  constants = constants,
+  data = Ndata,
+  inits = inits
+)
+
+model$calculate()
+
+fit <- run_sampler(
+  model = model,
+  sampler_type = 'custom_joint',
+  pz = pz,
+  L = L,
+  niter = 100000,
+  nburnin = 40000,
+  thin = 1,
+  vars_to_monitor = c('beta', 'tau', 'alpha', 'xi'),
+  ncen = 299, nobs = 1
+)
+
+summary(fit$samples[, c('beta[1]', 'beta[2]', 'beta[3]', 'tau')])
 ```
 
