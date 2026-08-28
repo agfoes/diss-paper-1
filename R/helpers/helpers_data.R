@@ -754,3 +754,141 @@ datagen_negbin <- function(n = 100,                                             
     Dnone = Dnone
   ))
 }
+
+#' gelc_censoring
+#'
+#' @description
+#' Generates finite interval-censoring bounds using the censoring mechanism
+#' used in the GELc simulation study. The initial inspection gap is Uniform
+#' on (0, mu), and subsequent gap widths are absolute Normal draws with
+#' mean mu and standard deviation 0.75 * mu.
+#'
+#' @param x true censored covariate values
+#' @param mu mean inspection gap
+#'
+#' @returns list containing CL and CR
+#' @export
+gelc_censoring <- function(x, mu) {
+  
+  n <- length(x)
+  
+  if (mu <= 0) {
+    stop('mu must be greater than 0')
+  }
+  
+  gap_initial <- runif(n, min = 0, max = mu)
+  
+  gap_generator <- function(nn) {
+    abs(rnorm(nn, mean = mu, sd = 0.75 * mu))
+  }
+  
+  gaps <- gap_generator(n * ceiling(max(x)))
+  gap_matrix <- matrix(gaps, nrow = n)
+  
+  while (any(rowSums(cbind(0, gap_initial, gap_matrix)) < x)) {
+    gaps <- c(gaps, gap_generator(n * 5))
+    gap_matrix <- matrix(gaps, nrow = n)
+  }
+  
+  inspection_times <- t(
+    apply(
+      cbind(0, gap_initial, gap_matrix),
+      1,
+      cumsum
+    )
+  )
+  
+  left_possible <- (x - inspection_times > -.Machine$double.eps^0.5)
+  right_possible <- (inspection_times - x > -.Machine$double.eps^0.5)
+  
+  CL <- apply(left_possible * inspection_times, 1, max)
+  
+  CR <- apply(
+    right_possible * inspection_times,
+    1,
+    function(z) min(z[z > 0])
+  )
+  
+  if (any(CL > x) || any(CR < x)) {
+    stop('Generated censoring interval does not contain X')
+  }
+  
+  return(list(
+    CL = CL,
+    CR = CR
+  ))
+}
+
+
+#' datagen_gelc_normal
+#'
+#' @description
+#' Generates data for the Gaussian P1/GELc comparison using the censored
+#' covariate and censoring mechanism from the GELc simulation design.
+#'
+#' @param n number of subjects
+#' @param mu mean censoring interval gap
+#' @param beta_x outcome coefficient for X
+#' @param beta_z outcome coefficient for Z2
+#' @param beta_0 outcome intercept
+#' @param tau outcome precision
+#' @param force_observed whether to force one exactly observed X value
+#'
+#' @returns data frame
+#' @export
+datagen_gelc_normal <- function(n = 500,
+                                mu = 3,
+                                beta_x = 0.1,
+                                beta_z = 0,
+                                beta_0 = 2,
+                                tau = 1,
+                                force_observed = TRUE) {
+  
+  ## censored covariate from GELc simulation
+  X <- rexp(n, rate = 1 / 12)
+  
+  ## additional fully observed covariate required for current P1 implementation
+  Z1 <- rep(1, n)
+  Z2 <- rnorm(n)
+  
+  ## Gaussian outcome
+  eta <- beta_0 + beta_z * Z2 + beta_x * X
+  
+  Y <- rnorm(
+    n,
+    mean = eta,
+    sd = 1 / sqrt(tau)
+  )
+  
+  ## GELc censoring mechanism
+  censoring <- gelc_censoring(
+    x = X,
+    mu = mu
+  )
+  
+  CL <- censoring$CL
+  CR <- censoring$CR
+  
+  Dobs <- rep(0L, n)
+  DL <- rep(0L, n)
+  DR <- rep(0L, n)
+  
+  ## temporary workaround for current P1 implementation
+  if (force_observed) {
+    CL[1] <- X[1]
+    CR[1] <- X[1]
+    Dobs[1] <- 1L
+  }
+  
+  return(data.frame(
+    Y = Y,
+    X = X,
+    Z1 = Z1,
+    Z2 = Z2,
+    CL = CL,
+    CR = CR,
+    Dobs = Dobs,
+    DL = DL,
+    DR = DR
+  ))
+}
