@@ -6,49 +6,18 @@ library(ICenCov)
 
 dir <- '/work/users/a/g/agfoes/P1'
 
-source(
-  file.path(
-    dir,
-    'R',
-    'config_gelc_comparison.R'
-  )
-)
+source(file.path(dir, 'R', 'GELc', 'config_gelc_comparison.R'))
 
-source(
-  file.path(
-    dir,
-    'R',
-    'helpers_data.R'
-  )
-)
+source(file.path(dir, 'R', 'helpers', 'helpers_data.R'))
 
-source(
-  file.path(
-    dir,
-    'R',
-    'helpers_nimble.R'
-  )
-)
+source(file.path(dir, 'R', 'helpers', 'helpers_nimble.R'))
 
-source(
-  file.path(
-    dir,
-    'R',
-    'helpers_sampler.R'
-  )
-)
+source(file.path( dir, 'R', 'helpers', 'helpers_sampler.R'))
 
 includeObs <- TRUE
 includeCen <- TRUE
 
-joint_model_code <- source(
-  file.path(
-    dir,
-    'R',
-    'model_code',
-    'model_normal_joint_betas.R'
-  )
-)$value
+source(file.path(dir, 'R', 'model_code', 'model_normal_joint_betas.R'))
 
 result_dir <- file.path(
   config[['project_dir']],
@@ -78,9 +47,7 @@ dir.create(
   showWarnings = FALSE
 )
 
-rep <- as.integer(
-  Sys.getenv('SLURM_ARRAY_TASK_ID')
-)
+rep <- as.integer(Sys.getenv('SLURM_ARRAY_TASK_ID'))
 
 if(is.na(rep)) {
   rep <- 1L
@@ -88,18 +55,11 @@ if(is.na(rep)) {
 
 result_file <- file.path(
   summary_dir,
-  sprintf(
-    'results_rep_%04d.csv',
-    rep
-  )
+  sprintf('results_rep_%04d.csv', rep)
 )
 
 if(file.exists(result_file)) {
-  message(
-    'Replication ',
-    rep,
-    ' already completed.'
-  )
+  message('Replication ', rep, ' already completed.')
   quit(save = 'no')
 }
 
@@ -124,10 +84,7 @@ saveRDS(
   data_full,
   file.path(
     data_dir,
-    sprintf(
-      'complete_data_rep_%04d.rds',
-      rep
-    )
+    sprintf('complete_data_rep_%04d.rds', rep)
   )
 )
 
@@ -176,27 +133,15 @@ for(mu in config[['mu_values']]) {
       ', mu = ', mu
     )
     
-    data <- data_mu[
-      seq_len(n),
-      ,
-      drop = FALSE
-    ]
+    data <- data_mu[seq_len(n), , drop = FALSE]
     
     ## ========================================================
     ## oracle
     ## ========================================================
     
-    oracle_time <- system.time({
-      
-      fit_oracle <- lm(
-        Y ~ Z2 + X,
-        data = data
-      )
-      
-    })[['elapsed']]
+    oracle_time <- system.time({fit_oracle <- lm(Y ~ Z2 + X, data = data)})[['elapsed']]
     
-    oracle_coef <-
-      summary(fit_oracle)$coefficients
+    oracle_coef <- summary(fit_oracle)$coefficients
     
     row_id <- row_id + 1
     
@@ -207,22 +152,10 @@ for(mu in config[['mu_values']]) {
       method = 'oracle',
       parameter = 'beta_x',
       truth = config[['beta_x']],
-      estimate = oracle_coef[
-        'X',
-        'Estimate'
-      ],
-      se = oracle_coef[
-        'X',
-        'Std. Error'
-      ],
-      lower =
-        oracle_coef['X', 'Estimate'] -
-        1.96 *
-        oracle_coef['X', 'Std. Error'],
-      upper =
-        oracle_coef['X', 'Estimate'] +
-        1.96 *
-        oracle_coef['X', 'Std. Error'],
+      estimate = oracle_coef['X', 'Estimate'],
+      se = oracle_coef['X', 'Std. Error'],
+      lower = oracle_coef['X', 'Estimate'] - 1.96 * oracle_coef['X', 'Std. Error'],
+      upper = oracle_coef['X', 'Estimate'] + 1.96 * oracle_coef['X', 'Std. Error'],
       runtime = as.numeric(oracle_time)
     )
     
@@ -235,11 +168,7 @@ for(mu in config[['mu_values']]) {
     gelc_time <- system.time({
       
       fit_gelc <- try(
-        icglm(
-          Y ~ Z2 + ic(CL, CR, 'X'),
-          family = gaussian,
-          data = data
-        ),
+        icglm(Y ~ Z2 + ic(CL, CR, 'X'), family = gaussian, data = data),
         silent = TRUE
       )
       
@@ -258,10 +187,10 @@ for(mu in config[['mu_values']]) {
         method = 'GELc',
         parameter = 'beta_x',
         truth = config[['beta_x']],
-        estimate = NA_real_,
-        se = NA_real_,
-        lower = NA_real_,
-        upper = NA_real_,
+        estimate = NA,
+        se = NA,
+        lower = NA,
+        upper = NA,
         runtime = as.numeric(gelc_time)
       )
       
@@ -269,8 +198,7 @@ for(mu in config[['mu_values']]) {
       
       gelc_summary <- summary(fit_gelc)
       
-      gelc_coef <-
-        gelc_summary$coefficients
+      gelc_coef <- gelc_summary$coefficients
       
       row_id <- row_id + 1
       
@@ -281,24 +209,10 @@ for(mu in config[['mu_values']]) {
         method = 'GELc',
         parameter = 'beta_x',
         truth = config[['beta_x']],
-        estimate =
-          gelc_coef[
-            'X',
-            'Estimate'
-          ],
-        se =
-          gelc_coef[
-            'X',
-            'Std. Error'
-          ],
-        lower =
-          gelc_coef['X', 'Estimate'] -
-          1.96 *
-          gelc_coef['X', 'Std. Error'],
-        upper =
-          gelc_coef['X', 'Estimate'] +
-          1.96 *
-          gelc_coef['X', 'Std. Error'],
+        estimate = gelc_coef['X', 'Estimate'],
+        se = gelc_coef['X', 'Std. Error'],
+        lower = gelc_coef['X', 'Estimate'] - 1.96 * gelc_coef['X', 'Std. Error'],
+        upper = gelc_coef['X', 'Estimate'] + 1.96 * gelc_coef['X', 'Std. Error'],
         runtime = as.numeric(gelc_time)
       )
     }
@@ -310,17 +224,11 @@ for(mu in config[['mu_values']]) {
     pz <- config[['pz']]
     L <- config[['L']]
     
-    Z <- as.matrix(
-      data[, c('Z1', 'Z2')]
-    )
+    Z <- as.matrix(data[, c('Z1', 'Z2')])
     
-    idx_obs <- which(
-      data$Dobs == 1
-    )
+    idx_obs <- which(data$Dobs == 1)
     
-    idx_cen <- which(
-      data$Dobs == 0
-    )
+    idx_cen <- which(data$Dobs == 0)
     
     nobs <- length(idx_obs)
     ncen <- length(idx_cen)
@@ -328,80 +236,38 @@ for(mu in config[['mu_values']]) {
     if(length(idx_obs) < 2) {
       idx_obs <- c(
         idx_obs,
-        rep(
-          1L,
-          2 - length(idx_obs)
-        )
+        rep(1L, 2 - length(idx_obs))
       )
     }
     
     if(length(idx_cen) < 2) {
       idx_cen <- c(
         idx_cen,
-        rep(
-          1L,
-          2 - length(idx_cen)
-        )
+        rep(1L, 2 - length(idx_cen))
       )
     }
     
     constants <- list(
       L = L,
       p = pz,
-      mu_gamma =
-        config[['mu_gamma']],
+      mu_gamma = config[['mu_gamma']],
       nobs = nobs,
       ncen = ncen,
       idx_obs = idx_obs,
       idx_cen = idx_cen,
-      beta_mean =
-        rep(0, pz + 1),
-      beta_cov =
-        diag(pz + 1)
+      beta_mean = rep(0, pz + 1),
+      beta_cov = diag(pz + 1)
     )
     
     Ndata <- list(
-      y_obs =
-        data$Y[
-          data$Dobs == 1
-        ],
-      
-      y_cen =
-        data$Y[
-          data$Dobs == 0
-        ],
-      
-      z_obs =
-        Z[
-          data$Dobs == 1,
-          ,
-          drop = FALSE
-        ],
-      
-      z_cen =
-        Z[
-          data$Dobs == 0,
-          ,
-          drop = FALSE
-        ],
-      
-      x_obs =
-        data$X[
-          data$Dobs == 1
-        ],
-      
-      CL =
-        data$CL[
-          data$Dobs == 0
-        ],
-      
-      CR =
-        data$CR[
-          data$Dobs == 0
-        ],
-      
-      constraint_data =
-        rep(1, ncen)
+      y_obs = data$Y[data$Dobs == 1],
+      y_cen = data$Y[data$Dobs == 0],
+      z_obs = Z[data$Dobs == 1, , drop = FALSE],
+      z_cen = Z[data$Dobs == 0, , drop = FALSE],
+      x_obs = data$X[data$Dobs == 1],
+      CL = data$CL[data$Dobs == 0],
+      CR = data$CR[data$Dobs == 0],
+      constraint_data = rep(1, ncen)
     )
     
     Ninits <- nimble_inits(
@@ -418,16 +284,14 @@ for(mu in config[['mu_values']]) {
       p1_result <- try({
         
         model <- nimbleModel(
-          code = joint_model_code,
+          code = model_code,
           constants = constants,
           data = Ndata,
           inits = Ninits
         )
         
         if(!is.finite(model$calculate())) {
-          stop(
-            'Non-finite initial model calculation'
-          )
+          stop('Non-finite initial model calculation')
         }
         
         set.seed(
@@ -440,18 +304,13 @@ for(mu in config[['mu_values']]) {
         
         run_sampler(
           model = model,
-          sampler_type =
-            config[['sampler']],
+          sampler_type = config[['sampler']],
           pz = pz,
           L = L,
-          niter =
-            config[['niter']],
-          nburnin =
-            config[['nburnin']],
-          thin =
-            config[['thin']],
-          vars_to_monitor =
-            config[['key_vars']],
+          niter = config[['niter']],
+          nburnin = config[['nburnin']],
+          thin = config[['thin']],
+          vars_to_monitor = config[['key_vars']],
           ncen = ncen,
           nobs = nobs
         )
@@ -473,20 +332,17 @@ for(mu in config[['mu_values']]) {
         method = 'P1',
         parameter = 'beta_x',
         truth = config[['beta_x']],
-        estimate = NA_real_,
-        se = NA_real_,
-        lower = NA_real_,
-        upper = NA_real_,
+        estimate = NA,
+        se = NA,
+        lower = NA,
+        upper = NA,
         runtime = as.numeric(p1_time)
       )
       
     } else {
       
       beta_x_samples <-
-        p1_result$samples[
-          ,
-          'beta[1]'
-        ]
+        p1_result$samples[ , 'beta[1]']
       
       beta_x_hpd <- HPDinterval(
         as.mcmc(beta_x_samples),
@@ -502,16 +358,11 @@ for(mu in config[['mu_values']]) {
         method = 'P1',
         parameter = 'beta_x',
         truth = config[['beta_x']],
-        estimate =
-          mean(beta_x_samples),
-        se =
-          sd(beta_x_samples),
-        lower =
-          beta_x_hpd[1, 'lower'],
-        upper =
-          beta_x_hpd[1, 'upper'],
-        runtime =
-          as.numeric(p1_time)
+        estimate = mean(beta_x_samples),
+        se = sd(beta_x_samples),
+        lower = beta_x_hpd[1, 'lower'],
+        upper = beta_x_hpd[1, 'upper'],
+        runtime = as.numeric(p1_time)
       )
     }
     
@@ -550,7 +401,4 @@ write.csv(
   row.names = FALSE
 )
 
-message(
-  'Completed replication ',
-  rep
-)
+message('Completed replication ', rep)

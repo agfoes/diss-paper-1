@@ -14,4 +14,4 @@ module purge
 module load r/4.5.0
 
 Rscript \
-  /work/users/a/g/agfoes/P1/R/run_gelc_comparison.R
+  /work/users/a/g/agfoes/P1/run_gelc_comparison.R
