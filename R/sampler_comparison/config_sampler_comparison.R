@@ -10,7 +10,7 @@
 config <- list(
   project_dir = '/work/users/a/g/agfoes/P1',
   #project_dir = "~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1",
-  run_name = "custom_sampler_test",
+  run_name = "sampler_test_custom_joint",
   
   pz = 3, # dimension of fully observed covariate vector (matching datagen specification)
   sigma_bx = 1, # prior sd
@@ -56,5 +56,11 @@ config <- list(
     "sigmasqTilde"
   ),
   
-  truth = c(0.7, 0, 1, -1, 1)
+  truth = c(
+    "beta[1]" = 0.7,
+    'betaz[2]' = 0,
+    'betaz[3]' = 1,
+    'betaz[4]' = -1,
+    tau = 1
+  )
 )

@@ -7,7 +7,7 @@
 library(dplyr)
 
 dir <- "/work/users/a/g/agfoes/P1"
-source(paste0(dir, "/R/config_sampler_comparison.R"))                                       # config
+source(paste0(dir, "/R/sampler_comparison/config_sampler_comparison.R"))                                       # config
 
 result_dir <- file.path(
   dir,

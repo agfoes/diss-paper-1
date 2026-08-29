@@ -224,7 +224,8 @@ for (i in seq_len(nrow(sim_grid_filt))) {
       saved_thin_samples <- seq(1, nrow(fit$samples), by = config[["save_key_thinning"]])
       
       key_samples <- as.data.frame(
-        fit$samples[saved_thin_samples, config[["key_vars"]], drop = FALSE]
+        fit$samples[saved_thin_samples, 
+                    c("beta[1]", "beta[2]", "beta[3]", "beta[4]", "tau"), drop = FALSE]
       ) %>%
         mutate(
           sim_id = sim_id,
