@@ -1,0 +1,417 @@
+---
+title: "outcome_testing"
+output: html_document
+---
+
+# Setup
+```{r}
+## load libraries
+library(nimble)
+library(truncnorm)
+library(coda)
+library(tidyverse)
+library(nimbleNoBounds)
+
+## source helper functions
+dir <- "~/Library/CloudStorage/OneDrive-UniversityofNorthCarolinaatChapelHill/Dissertation/Diss-Paper1"
+source(paste0(dir, "/R/helpers/helpers_data.R"))                                        # datagen
+source(paste0(dir, "/R/helpers/helpers_nimble.R"))                                      # nimble_constants, nimble_data_years, nimble_inits
+source(paste0(dir, "/R/helpers/helpers_sampler.R"))                                     # make_conf, run_sampler
+source(paste0(dir, "/R/helpers/helpers_summary.R"))                                     # posterior_summary, data_censoring_summary
+
+source(paste0(dir, "/R/model_code/glm_outcome_joint_models.R"))                         # model code for each GLM distribution - gamma, poisson, negbin, bernoulli, normal
+
+source(paste0(dir, "/R/custom_block_sampler.R"))
+
+
+set.seed(08312026)
+```
+
+# Function to view censoring proportions
+```{r}
+report <- function(data) {
+  interval <- data$Dobs == 0 & data$DL == 0 & data$DR == 0
+  
+  tibble(
+    n = length(data$Dobs),
+    prop_censored = mean(data$Dobs == 0),
+    prop_obs = mean(data$Dobs),
+    prop_left = mean(data$DL),
+    prop_right = mean(data$DR),
+    prop_interval = mean(interval),
+    median_width = median(data$CR[interval] - data$CL[interval]),
+    mean_width = mean(data$CR[interval] - data$CL[interval])
+  )
+}
+```
+
+# Normal outcome data generation
+## n = 1000, cens = 46.4%
+```{r}
+data <- datagen_glm(outcome = "normal", n = 1000,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+## n = 100, cens = 48%
+```{r}
+data <- datagen(n = 100,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+# Poisson outcome data generation
+## n = 1000, cens = 44%
+```{r}
+data <- datagen_poisson(n = 1000,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+## n = 100, cens = 45%
+```{r}
+data <- datagen_poisson(n = 100,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+# Gamma outcome data generation
+## n = 1000, cens = 43.3%
+```{r}
+data <- datagen_gamma(n = 1000,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+## n = 100, cens = 48%
+```{r}
+data <- datagen_gamma(n = 100,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+# Negative Binomial outcome data generation
+## n = 1000, cens = 44.7%
+```{r}
+data <- datagen_negbin(n = 1000,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+## n = 100, cens = 47%
+```{r}
+data <- datagen_negbin(n = 100,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+# Bernoulli outcome data generation
+## n = 1000, cens = 44.1%
+```{r}
+data <- datagen_bernoulli(n = 1000,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+## n = 100, cens = 54%
+```{r}
+data <- datagen_bernoulli(n = 100,
+                p_z2 = 0.8, mu_z3 = 2, sd_z3 = 1,
+                comps = 3, w = c(0.3, 0.5, 0.2), 
+                gamma = matrix(c(180, 730, 550,
+                                 255, 1095, 730,
+                                 330, 1460, 1095),
+                               nrow = 3, byrow = TRUE), 
+                x_sd = c(365, 455, 550),
+                beta_x = 0.7/365.25, beta_z = c(0,1,-1), tau = 1,
+                beta_omega = matrix(c(0, 1.5, -0.5,
+                                      0, 0.5, 0),
+                                    nrow = 2, byrow = TRUE), 
+                alpha_start = c(750, 350, 390), ## changes start of observation window - higher means more left censoring
+                alpha_width = c(log(800), 1.5, -0.2), ## changes length of observation window -- higher means less right censoring
+                sigma_start = 30, sigma_width = 0.15,
+                rho = c(0.90, 0.95, 0.99), 
+                jitter_sd = 30, 
+                eps_obs = 550 ## changes tolerance for observed subjects
+                )
+report(data)
+```
+
+
+# new combined datagen_glm function
+```{r}
+set.seed(08312026)
+
+outcomes <- c(
+  'normal',
+  'bernoulli',
+  'poisson',
+  'negbin',
+  'gamma'
+)
+
+n_values <- c(100, 1000)
+nrep <- 10
+
+censoring_results <- data.frame()
+
+for (outcome in outcomes) {
+
+  for (n in n_values) {
+
+    rep_results <- matrix(
+      NA,
+      nrow = nrep,
+      ncol = 5
+    )
+
+    colnames(rep_results) <- c(
+      'prop_censored',
+      'prop_left',
+      'prop_right',
+      'prop_interval',
+      'prop_observed'
+    )
+
+    for (r in 1:nrep) {
+
+      data <- datagen_glm(
+        outcome = outcome,
+        n = n,
+        p_z2 = 0.8,
+        mu_z3 = 2,
+        sd_z3 = 1,
+        comps = 3,
+        w = c(0.3, 0.5, 0.2),
+        gamma = matrix(
+          c(
+            180, 730, 550,
+            255, 1095, 730,
+            330, 1460, 1095
+          ),
+          nrow = 3,
+          byrow = TRUE
+        ),
+        x_sd = c(365, 455, 550),
+        beta_x = 0.7 / 365.25,
+        beta_z = c(0, 1, -1),
+        tau = 1,
+        beta_omega = matrix(
+          c(
+            0, 1.5, -0.5,
+            0, 0.5, 0
+          ),
+          nrow = 2,
+          byrow = TRUE
+        ),
+        #alpha_start = c(550, 150, 390), # 20% censoring
+        #alpha_start = c(750, 350, 390), # 40% censoring
+        alpha_start = c(1000, 500, 390), # 80% censoring
+        
+        #alpha_width = c(log(1100), 2, -0.2), # 20% censoring
+        #alpha_width = c(log(950), 1.5, -0.2), # 40% censoring
+        alpha_width = c(log(875), 0.5, -0.3), # 80% censoring
+        
+        sigma_start = 30,
+        sigma_width = 0.15,
+        rho = c(0.90, 0.95, 0.99),
+        jitter_sd = 30,
+        
+        #eps_obs = 775 # 20% censoring
+        #eps_obs = 550 # 40% censoring
+        eps_obs = 400 # 80% censoring
+      )
+
+      rep_results[r, ] <- c(
+        mean(data$Dobs == 0),
+        mean(data$DL == 1),
+        mean(data$DR == 1),
+        mean(
+          data$Dobs == 0 &
+          data$DL == 0 &
+          data$DR == 0
+          ),
+        mean(data$Dobs == 1)
+      )
+    }
+
+    censoring_results <- rbind(
+      censoring_results,
+      data.frame(
+        outcome = outcome,
+        n = n,
+        mean_censored = mean(rep_results[, 'prop_censored']),
+        sd_censored = sd(rep_results[, 'prop_censored']),
+        mean_left = mean(rep_results[, 'prop_left']),
+        mean_right = mean(rep_results[, 'prop_right']),
+        mean_interval = mean(rep_results[, 'prop_interval']),
+        mean_observed = mean(rep_results[, 'prop_observed'])
+      )
+    )
+  }
+}
+
+censoring_results
+```
+
