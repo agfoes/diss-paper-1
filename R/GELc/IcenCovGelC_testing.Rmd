@@ -412,3 +412,66 @@ fit <- run_sampler(
 summary(fit$samples[, c('beta[1]', 'beta[2]', 'beta[3]', 'tau')])
 ```
 
+# GELc interval width testing
+```{r}
+set.seed(09022026)
+mu_grid <- c(1, 3, 5, 10, 20, 50, 100)
+
+data_full <- datagen_gelc_normal(
+  n = 500,
+  mu = mu,
+  beta_x = 2,
+  beta_z = 0.1,
+  beta_0 = 0,
+  tau = 1,
+  force_observed = TRUE
+)
+
+gelc_stress_test <- vector("list", length(mu_grid))
+
+for (i in seq_along(mu_grid)) {
+  
+  mu <- mu_grid[i]
+  
+  dat <- datagen_gelc_normal(
+    n = 500,
+    mu = mu,
+    beta_x = 2,
+    beta_z = 0.1,
+    beta_0 = 0,
+    tau = 1
+  )
+  
+  width <- data$CR - data$CL
+  start_time <- Sys.time()
+  
+  fit <- icglm(Y ~ Z2 + ic(CL, CR, "X"),
+               family = gaussian,
+               data = dat)
+  
+  runtime <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  
+  coef_fit <- summary(fit)$coefficients
+  
+  gelc_stress_test[[i]] <- data.frame(
+    mu = mu,
+    mean_width = mean(width),
+    median_width = median(width),
+    min_width = min(width),
+    max_width = max(width),
+    
+    beta_0 = coef_fit['(Intercept)', 'Estimate'],
+    beta_z = coef_fit['Z2', 'Estimate'],
+    beta_x = coef_fit['X', 'Estimate'],
+
+    se_beta_0 = coef_fit['(Intercept)', 'Std. Error'],
+    se_beta_z = coef_fit['Z2', 'Std. Error'],
+    se_beta_x = coef_fit['X', 'Std. Error']
+  )
+  
+}
+
+gelc_stress <- do.call(rbid, gelc_stress_test)
+
+```
+

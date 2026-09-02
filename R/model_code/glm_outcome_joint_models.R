@@ -80,7 +80,7 @@ gamma_model_code <- nimbleCode({
     
     # outcome model
     eta[idx_cen[k]] <- inprod(z_cen[k, 1:p], beta[2:(p+1)]) + beta[1]*x_cen[k]
-    log(theta[idx_cen[k]]) <- eta[idx_cen[i]]
+    log(theta[idx_cen[k]]) <- eta[idx_cen[k]]
     
     y_cen[k] ~ dgamma(
       shape = tau,
@@ -140,7 +140,7 @@ poisson_model_code <- nimbleCode({
     eta[idx_obs[k]] <- inprod(z_obs[k, 1:p], beta[2:(p+1)]) + beta[1]*x_obs[k]
     log(theta[idx_obs[k]])  <- eta[idx_obs[k]]
     
-    y_obs[k] ~ dgamma(
+    y_obs[k] ~ dpois(
       shape = tau,
       rate = tau / theta[idx_obs[k]]
     )
@@ -170,7 +170,7 @@ poisson_model_code <- nimbleCode({
     
     # outcome model
     eta[idx_cen[k]] <- inprod(z_cen[k, 1:p], beta[2:(p+1)]) + beta[1]*x_cen[k]
-    log(theta[idx_cen[k]]) <- eta[idx_cen[i]]
+    log(theta[idx_cen[k]]) <- eta[idx_cen[k]]
     
     y_cen[k] ~ dpois(
       lambda = theta[idx_cen[k]]
@@ -229,9 +229,9 @@ negbin_model_code <- nimbleCode({
     eta[idx_obs[k]] <- inprod(z_obs[k, 1:p], beta[2:(p+1)]) + beta[1]*x_obs[k]
     log(theta[idx_obs[k]])  <- eta[idx_obs[k]]
     
-    y_obs[k] ~ dgamma(
-      shape = tau,
-      rate = tau / theta[idx_obs[k]]
+    y_obs[k] ~ dnegbin(
+      prob = tau / (tau + theta[idx_obs[k]]),
+      size = tau
     )
   }
   
@@ -262,7 +262,8 @@ negbin_model_code <- nimbleCode({
     log(theta[idx_cen[k]]) <- eta[idx_cen[i]]
     
     y_cen[k] ~ dnegbin(
-      prob = theta[idx_cen[k]]
+      prob = tau / (tau + theta[idx_obs[k]]),
+      size = tau
     )
   }
 })
@@ -316,11 +317,10 @@ bernoulli_model_code <- nimbleCode({
     
     # outcome model
     eta[idx_obs[k]] <- inprod(z_obs[k, 1:p], beta[2:(p+1)]) + beta[1]*x_obs[k]
-    log(theta[idx_obs[k]])  <- eta[idx_obs[k]]
+    logit(theta[idx_obs[k]])  <- eta[idx_obs[k]]
     
-    y_obs[k] ~ dgamma(
-      shape = tau,
-      rate = tau / theta[idx_obs[k]]
+    y_obs[k] ~ dbern(
+      prob = theta[idx_cen[k]]
     )
   }
   
@@ -348,7 +348,7 @@ bernoulli_model_code <- nimbleCode({
     
     # outcome model
     eta[idx_cen[k]] <- inprod(z_cen[k, 1:p], beta[2:(p+1)]) + beta[1]*x_cen[k]
-    log(theta[idx_cen[k]]) <- eta[idx_cen[i]]
+    logit(theta[idx_cen[k]]) <- eta[idx_cen[k]]
     
     y_cen[k] ~ dbern(
       prob = theta[idx_cen[k]]
