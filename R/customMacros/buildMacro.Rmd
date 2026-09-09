@@ -249,6 +249,8 @@ model$getCode()
 
 # test - full model code
 ```{r}
+family_def = "gaussian(link = 'identity')"
+
 base_block <- "
   beta[1:(p+1)] ~ dmnorm(
     mean = beta_mean[1:(p+1)],
@@ -275,7 +277,7 @@ base_block <- "
   }
 "
 
-obs_block <- "
+obs_block <- paste0("
   for (k in 1:nobs) {
     
     # cluster assignment
@@ -302,13 +304,14 @@ obs_block <- "
     
     y_obs[k] ~ DYNAMICGLM(
       eta = eta[idx_obs[k]],
-      family = gaussian(link = 'identity'),
+      family = ", family_def, ",
       tau = tau
     )
   }
 "
+)
 
-cen_block <- "
+cen_block <- paste0("
   for (k in 1:ncen) {
     
     # cluster assignment
@@ -335,11 +338,12 @@ cen_block <- "
     
     y_cen[k] ~ DYNAMICGLM(
       eta = eta[idx_cen[k]],
-      family = gaussian(link = 'identity'),
+      family = ", family_def, ",
       tau = tau
     )
   }
 "
+)
 
 mixed <- paste("{", base_block, cen_block, obs_block, "}")
 model_code <- eval(call("nimbleCode", parse(text = mixed)[[1]]))
