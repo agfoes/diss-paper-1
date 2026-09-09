@@ -108,7 +108,7 @@ sampler_beta_conjugate_block <- nimbleFunction(
   methods = list(reset = function() {})
 )
 
-## custom sampler with mixed observed and censored subjects ####
+## custom sampler - mixed ####
 sampler_beta_conjugate_block_mixed <- nimbleFunction(
   contains = sampler_BASE,
   
@@ -217,7 +217,7 @@ sampler_beta_conjugate_block_mixed <- nimbleFunction(
   methods = list(reset = function() {})
 )
 
-## custom sampler with only observed subjects ####
+## custom sampler - observed ####
 sampler_beta_conjugate_block_obs <- nimbleFunction(
   contains = sampler_BASE,
   
@@ -305,7 +305,7 @@ sampler_beta_conjugate_block_obs <- nimbleFunction(
   methods = list(reset = function() {})
 )
 
-## custom sampler for data in which ALL subjects are censored ####
+## custom sampler - censored ####
 sampler_beta_conjugate_block_cen <- nimbleFunction(
   contains = sampler_BASE,
   
@@ -489,7 +489,7 @@ sampler_beta_conjugate_block_mixed_intercept <- nimbleFunction(
 )
 
 
-## censored only - intercept only ####
+## censored - intercept only ####
 sampler_beta_conjugate_block_cens_intercept <- nimbleFunction(
   contains = sampler_BASE,
   

@@ -310,7 +310,7 @@ summary(fit$samples)
 set.seed(09022026)
 data <- datagen(alpha_width = c(10, 1, 1), alpha_start = c(1, 1, 1), eps_obs = 400) # creating arbitrarily large obs window to get all interval censored and then reduce tolerance for "closeness" of endpoints to get around 56% censoring
 
-mixed <- paste("{", base_block, cen_block, obs_block, "}")
+mixed <- paste("{", base_block_intercept, cen_block_intercept, obs_block_intercept, "}")
 model_code <- eval(call("nimbleCode", parse(text = mixed)[[1]]))
 
 pz <- 1
