@@ -7,6 +7,8 @@ output: html_document
 library(tidyverse)
 library(nimbleMacros)
 library(nimble)
+
+source("/work/users/a/g/agfoes/P1/R/helpers/helpers_data.R")
 ```
 
 # custom macro for family recognition in outcome model specification
@@ -345,8 +347,30 @@ cen_block <- paste0("
 "
 )
 
+
+set.seed(09022026)
+data <- datagen(alpha_width = c(10, 1, 1), alpha_start = c(1, 1, 1), eps_obs = 400)
+
+pz <- 3
+sigma_bx <- 1
+sigma_bz <- 1
+mu_gamma <- 0
+
+Nconstants <- nimble_constants(data,
+                               L = 50, pz = pz,
+                               sigma_bx = sigma_bx,
+                               sigma_bz = sigma_bz,
+                               mu_gamma = mu_gamma)
+Ndata <- nimble_data_years(data,
+                           constants = Nconstants)
+Ninits <- nimble_inits(data,
+                       pz = pz,
+                       constants = Nconstants,
+                       Ndata = Ndata)
+
 mixed <- paste("{", base_block, cen_block, obs_block, "}")
 model_code <- eval(call("nimbleCode", parse(text = mixed)[[1]]))
+
 model <- nimbleModel(
   code = model_code,
   constants = Nconstants,
