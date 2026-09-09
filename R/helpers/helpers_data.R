@@ -1120,70 +1120,6 @@ datagen_gamma <- function(n = 100,                                              
   ))
 }
 
-#' gelc_censoring
-#'
-#' @description
-#' Generates finite interval-censoring bounds using the censoring mechanism
-#' used in the GELc simulation study. The initial inspection gap is Uniform
-#' on (0, mu), and subsequent gap widths are absolute Normal draws with
-#' mean mu and standard deviation 0.75 * mu.
-#'
-#' @param x true censored covariate values
-#' @param mu mean inspection gap
-#'
-#' @returns list containing CL and CR
-#' @export
-gelc_censoring <- function(x, mu) {
-  
-  n <- length(x)
-  
-  if (mu <= 0) {
-    stop('mu must be greater than 0')
-  }
-  
-  gap_initial <- runif(n, min = 0, max = mu)
-  
-  gap_generator <- function(nn) {
-    abs(rnorm(nn, mean = mu, sd = 0.75 * mu))
-  }
-  
-  gaps <- gap_generator(n * ceiling(max(x)))
-  gap_matrix <- matrix(gaps, nrow = n)
-  
-  while (any(rowSums(cbind(0, gap_initial, gap_matrix)) < x)) {
-    gaps <- c(gaps, gap_generator(n * 5))
-    gap_matrix <- matrix(gaps, nrow = n)
-  }
-  
-  inspection_times <- t(
-    apply(
-      cbind(0, gap_initial, gap_matrix),
-      1,
-      cumsum
-    )
-  )
-  
-  left_possible <- (x - inspection_times > -.Machine$double.eps^0.5)
-  right_possible <- (inspection_times - x > -.Machine$double.eps^0.5)
-  
-  CL <- apply(left_possible * inspection_times, 1, max)
-  
-  CR <- apply(
-    right_possible * inspection_times,
-    1,
-    function(z) min(z[z > 0])
-  )
-  
-  if (any(CL > x) || any(CR < x)) {
-    stop('Generated censoring interval does not contain X')
-  }
-  
-  return(list(
-    CL = CL,
-    CR = CR
-  ))
-}
-
 
 #' datagen_gelc_normal
 #'
@@ -1201,55 +1137,44 @@ gelc_censoring <- function(x, mu) {
 #'
 #' @returns data frame
 #' @export
-datagen_gelc_normal <- function(n = 500,
-                                mu = 3,
-                                beta_x = 0.1,
-                                beta_z = 0,
-                                beta_0 = 2,
-                                tau = 1,
-                                force_observed = TRUE) {
+datagen_gelc_gamma <- function(n = 500,
+                               mu = 3,
+                               gamma = 0.02,
+                               alpha = 10,
+                               phi = 0.02) {
   
   ## censored covariate from GELc simulation
-  X <- rexp(n, rate = 1 / 12)
+  Z <- rexp(n, rate = 1 / 12) # they use Z for our X
   
-  ## additional fully observed covariate required for current P1 implementation
-  Z1 <- rep(1, n)
-  Z2 <- rnorm(n)
+  ## intercept for both the outcome and marginal regression models
+  X1 <- rep(1, n)
   
-  ## Gaussian outcome
-  eta <- beta_0 + beta_z * Z2 + beta_x * X
+  ## outcome mean and variance
+  mean <- exp(alpha + gamma * Z)
+  var <- phi*mean^2
   
-  Y <- rnorm(
-    n,
-    mean = eta,
-    sd = 1 / sqrt(tau)
-  )
+  Y <- rgamma(n, shape = (mean^2 / var), rate = (mean / var))
   
   ## GELc censoring mechanism
-  censoring <- gelc_censoring(
-    x = X,
-    mu = mu
-  )
+  CL <- rep(0, n)
+  CR <- rep(0, n)
   
-  CL <- censoring$CL
-  CR <- censoring$CR
+  if (mu == 0) {
+    CL <- Z
+    CR <- Z
+  } else {
+    CL <- gelc_censoring(mu, n, Z)$CL
+    CR <- gelc_censoring(mu, n, Z)$CR
+  }
   
   Dobs <- rep(0L, n)
   DL <- rep(0L, n)
   DR <- rep(0L, n)
   
-  ## temporary workaround for current P1 implementation
-  if (force_observed) {
-    CL[1] <- X[1]
-    CR[1] <- X[1]
-    Dobs[1] <- 1L
-  }
-  
   return(data.frame(
     Y = Y,
-    X = X,
-    Z1 = Z1,
-    Z2 = Z2,
+    Z = Z,
+    X1 = X1,
     CL = CL,
     CR = CR,
     Dobs = Dobs,
@@ -1258,3 +1183,36 @@ datagen_gelc_normal <- function(n = 500,
   ))
 }
 
+gelc_censoring <- function(mu = 0,
+                           n = 500,
+                           Z = rep(0, 500)) {
+  
+  CL <- numeric(n)
+  CR <- numeric(n)
+  
+  if (mu == 0) {
+    CL <- Z
+    CR <- Z
+  } else {
+    for (i in 1:n) {
+      eps0 <- runif(1, min = 0, max = mu)
+      visits <- c(0, eps0)
+      
+      # init first visit value for loop
+      visit <- visits[2]
+      
+      while(max(visits) <= Z[i]) {
+        gap <- rnorm(1, mean = mu, sd = sqrt(0.75*mu))
+        visit <- visit + gap
+        visits <- c(visits, visit)
+      }
+      
+      CL[i] <- max(visits[visits <= Z[i]])
+      CR[i] <- min(visits[visits > Z[i]])
+    }
+  }
+  
+  
+  
+  return(data.frame(CL = CL, CR = CR))
+}

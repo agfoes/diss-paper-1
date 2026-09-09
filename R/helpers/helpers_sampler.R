@@ -58,7 +58,7 @@ make_conf <- function(model, sampler_type = 'default', pz, L, vars, nobs, ncen) 
     )
   }
   
-  ## custom joint conjugate sampler
+  ## custom joint conjugate sampler - with mixed censoring and observation
   if (sampler_type == "custom_joint") {
     
     conf$removeSamplers("beta")
@@ -72,6 +72,80 @@ make_conf <- function(model, sampler_type = 'default', pz, L, vars, nobs, ncen) 
       )
     )
   }
+  
+  ## custom joint conjugate sampler - with mixed censoring and observation
+  if (sampler_type == "custom_joint_mixed") {
+    
+    conf$removeSamplers("beta")
+    conf$addSampler(
+      target = "beta",
+      type = sampler_beta_conjugate_block_mixed,
+      control = list(
+        p = pz,
+        nobs = as.integer(nobs),
+        ncen = as.integer(ncen)
+      )
+    )
+  }
+  
+  ## custom joint conjugate sampler - with mixed censoring and observation - intercept only model for X
+  if (sampler_type == "custom_joint_mixed_intercept") {
+    
+    conf$removeSamplers("beta")
+    conf$addSampler(
+      target = "beta",
+      type = sampler_beta_conjugate_block_mixed_intercept,
+      control = list(
+        p = pz,
+        nobs = as.integer(nobs),
+        ncen = as.integer(ncen)
+      )
+    )
+  }
+  
+  ## custom joint conjugate sampler - with only observed subjects
+  if (sampler_type == "custom_joint_obs") {
+    
+    conf$removeSamplers("beta")
+    conf$addSampler(
+      target = "beta",
+      type = sampler_beta_conjugate_block_obs,
+      control = list(
+        p = pz,
+        nobs = as.integer(nobs)
+      )
+    )
+  }
+  
+  ## custom joint conjugate sampler - with only censored subjects
+  if (sampler_type == "custom_joint_cen") {
+    
+    conf$removeSamplers("beta")
+    conf$addSampler(
+      target = "beta",
+      type = sampler_beta_conjugate_block_cen,
+      control = list(
+        p = pz,
+        ncen = as.integer(ncen)
+      )
+    )
+  }
+  
+  ## custom joint conjugate sampler - with only censored subjects
+  if (sampler_type == "custom_joint_int_cens") {
+    
+    conf$removeSamplers("beta")
+    conf$addSampler(
+      target = "beta",
+      type = sampler_beta_conjugate_block_cens_intercept,
+      control = list(
+        p = pz,
+        ncen = as.integer(ncen)
+      )
+    )
+  }
+  
+  
   
   conf$printMonitors()
   conf$printSamplers("beta")
