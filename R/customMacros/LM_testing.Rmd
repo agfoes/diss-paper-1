@@ -1,0 +1,44 @@
+---
+title: "LM_testing"
+output: html_document
+---
+
+We won't be able to directly use LM when we have both censored and uncensored subjects because it builds the model as if it is over all subjects and I don't think it would make sense to split the censored/uncensored or subject-level GLMs when we have one big model.
+
+```{r}
+library(nimble)
+library(nimbleMacros)
+
+
+```
+
+# built model
+```{r}
+
+code <- nimbleCode({
+  LM(y[1:N] ~ x[1:N], family = poisson())
+})
+
+
+set.seed(1)
+
+N <- 10
+
+constants <- list(
+  N = N,
+  x = rnorm(N)
+)
+
+data <- list(
+  y = rnorm(N)
+)
+
+model <- nimbleModel(
+  code = code,
+  constants = list(N = N, x = rnorm(N)),
+  data = list(y = rpois(N,2))
+)
+
+model$getCode()
+```
+

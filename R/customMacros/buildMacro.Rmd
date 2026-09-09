@@ -1,0 +1,355 @@
+---
+title: "buildMacro"
+output: html_document
+---
+
+```{r, warning = F, message = F}
+library(tidyverse)
+library(nimbleMacros)
+library(nimble)
+```
+
+# custom macro for family recognition in outcome model specification
+```{r}
+nimbleOptions(enableMacros = TRUE)
+
+DYNAMICGLM <- buildMacro(
+  function(stoch, 
+           LHS, 
+           eta, 
+           family, 
+           tau = NULL, 
+           modelInfo, 
+           .env
+           ) {
+    
+    family_obj <- eval(family, envir = .env)
+    family_name <- family_obj$family
+    link_name <- family_obj$link
+    
+    eta_index <- eta[[3]] # grabs the index idx_cen[k] from eta[idx_cen[k]]
+    theta_node <- substitute(
+      theta[INDEX],
+      list(INDEX = eta_index)
+    )
+    
+    # use family$link to determine theta
+    if (link_name == "identity") {
+      link_code <- substitute(
+        THETA <- ETA,
+        list(
+          THETA = theta_node,
+          ETA = eta
+        )
+      )
+    } else if (link_name == "log") {
+      link_code <- substitute(
+        log(THETA) <- ETA,
+        list(
+          THETA = theta_node,
+          ETA = eta
+        )
+      )
+    } else if (link_name == "logit") {
+      link_code <- substitute(
+        logit(THETA) <- ETA,
+        list(
+          THETA = theta_node,
+          ETA = eta
+        )
+      )
+    } else {
+      stop("Unsupported link function.")
+    }
+    
+    # use family$family to determine outcome model
+    if (family_name == "gaussian") {
+      family_code <- substitute(
+        Y ~ dnorm(mean = THETA,
+                  tau = TAU),
+        list(
+          Y = LHS,
+          THETA = theta_node,
+          TAU = tau
+        )
+      )
+    } else if (family_name == "poisson") {
+      family_code <- substitute(
+        Y ~ dpois(lambda = THETA),
+        list(
+          Y = LHS,
+          THETA = theta_node
+        )
+      )
+    } else if (family_name == "Gamma") {
+      family_code <- substitute(
+        Y ~ dgamma(shape = TAU,
+                   rate = TAU / THETA),
+        list(
+          Y = LHS,
+          THETA = theta_node,
+          TAU = tau
+        )
+      )
+    } else if (family_name == "binomial") {
+      family_code <- substitute(
+        Y ~ dbern(prob = THETA),
+        list(
+          Y = LHS,
+          THETA = theta_node
+        )
+      )
+    } else {
+      stop("Unsupported family distribution.")
+    }
+    
+    # combine family and link into final model code
+    new_code <- as.call(c(list(as.name("{")),
+                          list(link_code),
+                          list(family_code)))
+    
+    list(code = new_code,
+         modelInfo = modelInfo)
+  },
+  use3pieces = TRUE,
+  unpackArgs = TRUE
+)
+
+```
+
+# test - gaussian (identity)
+```{r, message = FALSE}
+code <- nimbleCode({
+
+  beta ~ dnorm(0, 1)
+  tau ~ dgamma(1, 1)
+
+  eta[1] <- beta
+
+  y[1] ~ DYNAMICGLM(
+    eta = eta[1],
+    family = gaussian(link = "identity"),
+    tau = tau
+  )
+})
+
+model <- nimbleModel(
+  code = code,
+  data = list(
+    y = 1
+  )
+)
+
+model$getCode()
+```
+
+# test - gaussian (log)
+```{r, message = FALSE}
+code <- nimbleCode({
+
+  beta ~ dnorm(0, 1)
+  tau ~ dgamma(1, 1)
+
+  eta[1] <- beta
+
+  y[1] ~ DYNAMICGLM(
+    eta = eta[1],
+    family = gaussian(link = "log"),
+    tau = tau
+  )
+})
+
+model <- nimbleModel(
+  code = code,
+  data = list(
+    y = 1
+  )
+)
+
+model$getCode()
+```
+
+# test - gaussian (inverse)
+```{r, message = FALSE}
+code <- nimbleCode({
+
+  beta ~ dnorm(0, 1)
+  tau ~ dgamma(1, 1)
+
+  eta[1] <- beta
+
+  y[1] ~ DYNAMICGLM(
+    eta = eta[1],
+    family = gaussian(link = "inverse"),
+    tau = tau
+  )
+})
+
+model <- nimbleModel(
+  code = code,
+  data = list(
+    y = 1
+  )
+)
+
+model$getCode()
+```
+
+# test - poisson (log)
+```{r, message = FALSE}
+code <- nimbleCode({
+
+  beta ~ dnorm(0, 1)
+  tau ~ dgamma(1, 1)
+
+  eta[1] <- beta
+
+  y[1] ~ DYNAMICGLM(
+    eta = eta[1],
+    family = poisson(link = "log"),
+    tau = tau
+  )
+})
+
+model <- nimbleModel(
+  code = code,
+  data = list(
+    y = 1
+  )
+)
+
+model$getCode()
+```
+
+# test - gamma (log)
+```{r, message = FALSE}
+code <- nimbleCode({
+
+  beta ~ dnorm(0, 1)
+  tau ~ dgamma(1, 1)
+
+  eta[1] <- beta
+
+  y[1] ~ DYNAMICGLM(
+    eta = eta[1],
+    family = Gamma(link = "log"),
+    tau = tau
+  )
+})
+
+model <- nimbleModel(
+  code = code,
+  data = list(
+    y = 1
+  )
+)
+
+model$getCode()
+```
+
+# test - full model code
+```{r}
+base_block <- "
+  beta[1:(p+1)] ~ dmnorm(
+    mean = beta_mean[1:(p+1)],
+    cov = beta_cov[1:(p+1), 1:(p+1)]
+  )
+  
+  tau ~ dgamma(1,1)
+  lalpha ~ dLogGamma(1, 1)
+  alpha <- exp(lalpha)
+  
+  ### stick-breaking
+  for (h in 1:(L-1)) {
+    v[h] ~ dbeta(1, alpha)
+  }
+  w[1:L] <- stick_breaking(v[1:(L-1)])
+  
+  ### component-level parameters
+  for (h in 1:L) {
+    sigmasqTilde[h] ~ dinvgamma(1,1)
+    
+    for (j in 1:p) {
+      gammaTilde[h, j] ~ dnorm(mu_gamma, var = sigmasqTilde[h])
+    }
+  }
+"
+
+obs_block <- "
+  for (k in 1:nobs) {
+    
+    # cluster assignment
+    xi[idx_obs[k]] ~ dcat(w[1:L])
+    
+    # assign component parameters based on cluster assignment
+    for (j in 1:p) {
+      gamma[idx_obs[k],j] <- gammaTilde[xi[idx_obs[k]],j]
+    }
+    sigmasq[idx_obs[k]] <- sigmasqTilde[xi[idx_obs[k]]]
+    
+    # latent X
+    x_obs[k] ~ dnorm(
+      mean = inprod(gamma[idx_obs[k], 1:p], z_obs[k, 1:p]),
+      var = sigmasq[idx_obs[k]])
+    
+    # outcome model
+    if (p > 1) {
+      eta[idx_obs[k]] <- inprod(z_obs[k, 1:p], beta[2:(p+1)]) + beta[1]*x_obs[k]
+    } else if (p == 1) {
+      eta[idx_obs[k]] <- z_obs[k, 1] * beta[2] + beta[1] * x_obs[k]
+    }
+    
+    
+    y_obs[k] ~ DYNAMICGLM(
+      eta = eta[idx_obs[k]],
+      family = gaussian(link = 'identity'),
+      tau = tau
+    )
+  }
+"
+
+cen_block <- "
+  for (k in 1:ncen) {
+    
+    # cluster assignment
+    xi[idx_cen[k]] ~ dcat(w[1:L])
+    
+    # assign component parameters based on cluster assignment
+    for (j in 1:p) {
+      gamma[idx_cen[k],j] <- gammaTilde[xi[idx_cen[k]],j]
+    }
+    sigmasq[idx_cen[k]] <- sigmasqTilde[xi[idx_cen[k]]]
+    
+    # latent X
+    x_cen[k] ~ dnorm(
+      mean = inprod(gamma[idx_cen[k], 1:p], z_cen[k, 1:p]),
+      var = sigmasq[idx_cen[k]])
+    
+    # outcome model
+    if (p > 1) {
+      eta[idx_cen[k]] <- inprod(z_cen[k, 1:p], beta[2:(p+1)]) + beta[1]*x_cen[k]
+    } else if (p == 1) {
+      eta[idx_cen[k]] <- z_cen[k, 1] * beta[2] + beta[1] * x_cen[k]
+    }
+    
+    
+    y_cen[k] ~ DYNAMICGLM(
+      eta = eta[idx_cen[k]],
+      family = gaussian(link = 'identity'),
+      tau = tau
+    )
+  }
+"
+
+mixed <- paste("{", base_block, cen_block, obs_block, "}")
+model_code <- eval(call("nimbleCode", parse(text = mixed)[[1]]))
+model <- nimbleModel(
+  code = model_code,
+  constants = Nconstants,
+  inits = Ninits,
+  data = Ndata
+)
+model$getCode()
+```
+
+
