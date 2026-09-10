@@ -5,6 +5,7 @@ library(tidyverse)
 library(ICenCov)
 
 dir <- '/work/users/a/g/agfoes/P1'
+run_name <- "small_gelc_comparison_P1_gamma"
 
 source(file.path(dir, 'R', 'GELc', 'config_gelc_comparison.R'))
 source(file.path(dir, 'R', 'helpers', 'helpers_data.R'))
@@ -15,9 +16,9 @@ source(file.path(dir, "R", "custom_block_sampler.R"))
 
 
 result_dir <- file.path(
-  config[['project_dir']],
+  dir,
   'results',
-  config[['run_name']]
+  run_name
 )
 
 summary_dir <- file.path(
@@ -63,12 +64,12 @@ if(file.exists(result_file)) {
 ## ------------------------------------------------------------
 
 set.seed(
-  config[['sim_seed']] +
+  09102026 +
     rep
 )
 
 data_full <- datagen_gelc_gamma(
-  n = max(config[['n_values']]),
+  n = 500,
   mu = 0,
   gamma = 0.02,
   phi = 0.02
@@ -89,19 +90,20 @@ row_id <- 0
 ## ------------------------------------------------------------
 ## Generate censoring for each mu
 ## ------------------------------------------------------------
-
-for(mu in config[['mu_values']]) {
+mu_values <- c(3, 6, 9, 12)
+n_values <- c(100, 300, 500)
+for(mu in mu_values) {
   
   ## separate deterministic censoring seed
   set.seed(
-    config[['sim_seed']] +
+    09102026 +
       1000000 +
       rep * 100 +
       mu
   )
   
   censoring <- gelc_censoring(
-    n = max(config[["n_values"]]),
+    n = 500,
     mu = mu,
     Z = data_full$Z
   )
@@ -114,7 +116,7 @@ for(mu in config[['mu_values']]) {
   ## Nested n = 100, 300, 500
   ## ----------------------------------------------------------
   
-  for(n in config[['n_values']]) {
+  for(n in n_values) {
     
     message(
       'rep = ', rep,
@@ -238,9 +240,6 @@ for(mu in config[['mu_values']]) {
     )
     Ninits[["gammaTilde"]] <- as.vector(Ninits[["gammaTilde"]])
     
-    
-    p1_error <- FALSE
-    
     p1_time <- system.time({
       model <- nimbleModel(
         code = model_code,
@@ -259,12 +258,12 @@ for(mu in config[['mu_values']]) {
       
       p1_result <- run_sampler(
         model = model,
-        sampler_type = "custom_joint_int_cens",
+        sampler_type = "AF_slice",
         pz = pz,
         L = L,
-        niter = config[['niter']],
-        nburnin = config[['nburnin']],
-        thin = config[['thin']],
+        niter = 100000,
+        nburnin = 40000,
+        thin = 1,
         vars_to_monitor = c("beta", "tau"),
         ncen = ncen,
         nobs = nobs

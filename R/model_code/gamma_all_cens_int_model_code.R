@@ -37,11 +37,11 @@ model_code <- nimbleCode({
     
     # outcome model
     eta[idx_cen[k]] <- z_cen[k] * beta[2] + beta[1] * x_cen[k]
+    log(theta[idx_cen[k]])  <- eta[idx_cen[k]]
     
-    
-    y_cen[k] ~ dnorm(
-      mean = eta[idx_cen[k]],
-      tau = tau
+    y_cen[k] ~ dgamma(
+      shape = tau,
+      rate = tau / theta[idx_cen[k]]
     )
   }
 })

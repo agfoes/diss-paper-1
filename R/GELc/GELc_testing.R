@@ -15,7 +15,7 @@ if(is.na(rep)) {
   rep <- 1L
 }
 
-results_file <- file.path(dir, "results", "gelc_stress_test", paste0("results_", rep, ".csv"))
+results_file <- file.path(dir, "results", "gelc_stress_test", paste0("raw_results2/results_", rep, ".csv"))
 
 # generate largest dataset once at max n value with zero censoring ####
 set.seed(as.numeric(09042026 + rep*1000))
@@ -32,7 +32,9 @@ rep_results <- list()
 row_id <- 0
 
 sim_sett <- expand.grid(n = c(100, 300, 500),
-                        mu = c(0, 1, 3, 6, 9, 12, 20, 50, 100))
+                        mu = c(0, 1, 3, 6, 9, 12, 20, 50, 100, 500),
+                        array_id = c(1:1000)) %>%
+  filter(array_id == rep)
 
 
 # loop over sample sizes and censoring levels by modifying original dataset ####
@@ -67,6 +69,7 @@ for (i in 1:nrow(sim_sett)) {
     results_row <- data.frame(method = "GELc",
                               n = n,
                               mu = mu,
+                              mean_int_width = mean(data$CR - data$CL),
                               success = FALSE, 
                               error = conditionMessage(fit),
                               runtime = NA,
@@ -82,6 +85,7 @@ for (i in 1:nrow(sim_sett)) {
     results_row <- data.frame(method = "GELc",
                               n = n,
                               mu = mu,
+                              mean_int_width = mean(data$CR - data$CL),
                               success = TRUE, 
                               error = NA,
                               runtime = gelc_time,
@@ -109,6 +113,7 @@ for (i in 1:nrow(sim_sett)) {
   results_row <- data.frame(method = "oracle",
                             n = n,
                             mu = mu,
+                            mean_int_width = mean(data$CR - data$CL),
                             success = TRUE, 
                             error = NA,
                             runtime = oracle_time,

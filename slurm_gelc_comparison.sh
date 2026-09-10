@@ -3,7 +3,7 @@
 #SBATCH --job-name=gelc
 #SBATCH --mail-user=agfoes@unc.edu
 #SBATCH --mail-type=ALL
-#SBATCH --array=1-1000%200
+#SBATCH --array=1-10%200
 #SBATCH --time=48:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
