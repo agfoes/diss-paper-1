@@ -7,6 +7,7 @@ output: html_document
 library(tidyverse)
 library(nimbleMacros)
 library(nimble)
+library(nimbleNoBounds)
 
 source("/work/users/a/g/agfoes/P1/R/helpers/helpers_data.R")
 ```
@@ -380,4 +381,167 @@ model <- nimbleModel(
 model$getCode()
 ```
 
+# test - new parameterization - pzy, pzx, py
+```{r}
+family_def = "gaussian(link = 'identity')"
 
+base_block <- "
+  beta[1:py] ~ dmnorm(
+    mean = beta_mean[1:py],
+    cov = beta_cov[1:py, 1:py]
+  )
+  
+  tau ~ dgamma(1,1)
+  lalpha ~ dLogGamma(1, 1)
+  alpha <- exp(lalpha)
+  
+  ### stick-breaking
+  for (h in 1:(L-1)) {
+    v[h] ~ dbeta(1, alpha)
+  }
+  w[1:L] <- stick_breaking(v[1:(L-1)])
+  
+  ### component-level parameters
+  for (h in 1:L) {
+    sigmasqTilde[h] ~ dinvgamma(1,1)
+    
+    if (pzx > 1) {
+      for (j in 1:pzx) {
+        gammaTilde[h, j] ~ dnorm(mu_gamma, var = sigmasqTilde[h])
+      }
+    } else if (pzx == 1) {
+      gammaTilde[h] ~ dnorm(mu_gamma, var = sigmasqTilde[h])
+    }
+    
+    
+  }
+"
+
+obs_block <- paste0("
+  for (k in 1:nobs) {
+    
+    # cluster assignment
+    xi[idx_obs[k]] ~ dcat(w[1:L])
+    
+    # assign component parameters based on cluster assignment
+    if (pzx > 1) {
+      for (j in 1:pzx) {
+        gamma[idx_obs[k],j] <- gammaTilde[xi[idx_obs[k]],j]
+      }
+    } else if (pzx == 1) {
+      gamma[idx_obs[k]] <- gammaTilde[xi[idx_obs[k]]]
+    }
+
+    sigmasq[idx_obs[k]] <- sigmasqTilde[xi[idx_obs[k]]]
+    
+    # latent X
+    if (pzx > 1) {
+      mean_x[idx_obs[k]] <- inprod(gamma[idx_obs[k], 1:pzx], zx_obs[k, 1:pzx])
+    } else if (pzx == 1) {
+      mean_x[idx_obs[k]] <- gamma[idx_obs[k]] * zx_obs[k]
+    }
+    
+    x_obs[k] ~ dnorm(
+      mean = mean_x[idx_obs[k]],
+      var = sigmasq[idx_obs[k]])
+    
+    # outcome model
+    if (pzy > 1) {
+      eta[idx_obs[k]] <- beta[1]*x_obs[k] + inprod(zy_obs[k, 1:pzy], beta[2:py])
+    } else if (pzy == 1) {
+      eta[idx_obs[k]] <- beta[1]*x_obs[k] + zy_obs[k] * beta[2]
+    }
+    
+    
+    y_obs[k] ~ DYNAMICGLM(
+      eta = eta[idx_obs[k]],
+      family = ", family_def, ",
+      tau = tau
+    )
+  }
+"
+)
+
+cen_block <- paste0("
+  for (k in 1:ncen) {
+    
+    # cluster assignment
+    xi[idx_cen[k]] ~ dcat(w[1:L])
+    
+    # assign component parameters based on cluster assignment
+    if (pzx > 1) {
+      for (j in 1:pzx) {
+        gamma[idx_cen[k],j] <- gammaTilde[xi[idx_cen[k]],j]
+      }
+    } else if (pzx == 1) {
+      gamma[idx_cen[k]] <- gammaTilde[xi[idx_cen[k]]]
+    }
+    
+    sigmasq[idx_cen[k]] <- sigmasqTilde[xi[idx_cen[k]]]
+
+    # latent X
+    if (pzx > 1) {
+      mean_x[idx_cen[k]] <- inprod(gamma[idx_cen[k], 1:pzx], zx_cen[k, 1:pzx])
+    } else if (pzx == 1) {
+      mean_x[idx_cen[k]] <- gamma[idx_cen[k]] * zx_cen[k]
+    }
+    x_cen[k] ~ dnorm(
+      mean = mean_x[idx_cen[k]],
+      var = sigmasq[idx_cen[k]])
+    
+    # outcome model
+    if (pzy > 1) {
+      eta[idx_cen[k]] <- beta[1]*x_cen[k] + inprod(zy_cen[k, 1:pzy], beta[2:py])
+    } else if (pzy == 1) {
+      eta[idx_cen[k]] <- beta[1]*x_cen[k] + zy_cen[k] * beta[2]
+    }
+    
+    
+    y_cen[k] ~ DYNAMICGLM(
+      eta = eta[idx_cen[k]],
+      family = ", family_def, ",
+      tau = tau
+    )
+  }
+"
+)
+
+
+set.seed(09022026)
+data <- datagen(alpha_width = c(10, 1, 1), alpha_start = c(1, 1, 1), eps_obs = 400)
+
+pz <- 3
+sigma_bx <- 1
+sigma_bz <- 1
+mu_gamma <- 0
+
+Nconstants <- nimble_constants(data,
+                               L = 50, pz = pz,
+                               sigma_bx = sigma_bx,
+                               sigma_bz = sigma_bz,
+                               mu_gamma = mu_gamma)
+Nconstants[["py"]] <- py
+Nconstants[["pzx"]] <- pzx
+Nconstants[["pzy"]] <- pzy
+Nconstants[["beta_mean"]] <- rep(0, py)
+Nconstants[["beta_cov"]] <- diag(c(sigma_bx, sigma_bz), py)
+
+Ndata <- nimble_data_years(data,
+                           constants = Nconstants)
+Ninits <- nimble_inits(data,
+                       pz = pz,
+                       constants = Nconstants,
+                       Ndata = Ndata)
+Ninits[["beta"]] <- rep(0, py)
+
+mixed <- paste("{", base_block, cen_block, obs_block, "}")
+model_code <- eval(call("nimbleCode", parse(text = mixed)[[1]]))
+
+model <- nimbleModel(
+  code = model_code,
+  constants = Nconstants,
+  inits = Ninits,
+  data = Ndata
+)
+model$getCode()
+```

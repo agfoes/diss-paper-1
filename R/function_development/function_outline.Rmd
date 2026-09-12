@@ -1,0 +1,160 @@
+---
+title: "function_outline"
+output: html_document
+---
+
+# libraries and dependencies
+```{r}
+library(dplyr)
+library(nimble)
+library(nimbleNoBounds)
+library(nimbleMacros)
+```
+
+# ideal input
+## outcome model formula
+## outcome model family and link function
+## covariate model formula
+## censored covariates and their censoring bounds
+## data
+```{r}
+outcome_formula <- y ~ x_1 + z_1 + z_2 + z_3
+outcome_family <- gaussian(link = "identity")
+
+covariate_formula <- x_1 ~ z_1 + z_2 + z_3
+censored_covariate <- "x_1"
+censoring_bounds <- c("CL", "CR")
+
+data <- data.frame(
+  y = c(1, 2, 3),
+  z_1 = c(2, 3, 4),
+  z_2 = c(3, 4, 5),
+  z_3 = c(4, 5, 6),
+  CL = c(5, 6, 7),
+  CR = c(6, 7, 8)
+)
+```
+
+# parse model formulas and data into design matrices
+```{r}
+# remove variables in censored_covariate from outcome_formula and create new updated/observed outcome_formula
+observed_formula <- update(
+  outcome_formula,
+  paste(". ~ . -", paste(censored_covariate, collapse = " - "))
+)
+
+outcome_mf <- model.frame(observed_formula, data = data)
+
+Y <- model.response(outcome_mf)
+Zy <- model.matrix(observed_formula, data = data) # automatically adds an intercept
+
+Zx <- model.matrix(delete.response(terms(covariate_formula)),
+                   data = data) # automatically adds an intercept
+
+pzy <- dim(Zy)[2] # includes intercept + dim of supplied uncensored covariates
+py <- pzy + 1 # add one for the censored covariate
+pzx <- dim(Zx)[2]
+```
+
+# build nimble data, inits, and constants
+```{r}
+
+nimble_inputs <- nimbleInputs(CL = data$CL,
+                              CR = data$CR,
+                              Zy = Zy,
+                              Zx = Zx,
+                              Y = Y)
+
+```
+
+
+# build nimble model code depending on model formulas and families
+```{r}
+family_def <- "gaussian(link = 'identity')"
+model_code <- buildModelCode(family = as.character(family_def),
+                             nobs = nimble_inputs$Nconstants$nobs,
+                             ncen = nimble_inputs$Nconstants$ncen)
+```
+
+# configure, compile, build nimble model
+```{r}
+
+model <- nimbleModel(
+  code = model_code,
+  data = nimble_inputs$Ndata,
+  constants = nimble_inputs$Nconstants,
+  inits = nimble_inputs$Ninits
+)
+
+
+conf <- configureMCMC(model,
+                      useConjugacy = TRUE)
+
+conf$removeSamplers("beta")
+
+if (sampler_type == 'block') {
+
+  conf$addSampler(
+    target = "beta",
+    type = 'RW_block',
+    control = list(scale = 0.05, adaptInterval = 100)
+  )
+} else if (sampler_type == 'AF_slice') {
+    
+  conf$addSampler(
+    target = "beta",
+    type = 'AF_slice'
+  )
+} else if (sampler_type == "custom_joint_mixed") {
+    
+  conf$addSampler(
+    target = "beta",
+    type = sampler_beta_conjugate_block_mixed,
+    control = list(
+      p = pz,
+      nobs = as.integer(nobs),
+      ncen = as.integer(ncen)
+    )
+  )
+} else if (sampler_type == "custom_joint_obs") {
+  
+  conf$addSampler(
+    target = "beta",
+    type = sampler_beta_conjugate_block_obs,
+    control = list(
+      p = pz,
+      nobs = as.integer(nobs)
+    )
+  )
+} else if (sampler_type == "custom_joint_cen") {
+    
+  conf$addSampler(
+    target = "beta",
+    type = sampler_beta_conjugate_block_cen,
+    control = list(
+      p = pz,
+      ncen = as.integer(ncen)
+    )
+  )
+}
+  
+  
+
+conf$printMonitors()
+conf$printSamplers("beta")
+```
+
+
+# pick samplers depending on model family and link function
+```{r}
+# optional specify sampler for outcome model regression coefficients
+if (family == gaussian) {use joint conjugate normal sampler} # or just AF_slice?
+if (family != gaussian) {use AF_slice sampler}
+```
+
+
+# run nimble model and get samples
+
+# report summary statistics / return samples
+
+
