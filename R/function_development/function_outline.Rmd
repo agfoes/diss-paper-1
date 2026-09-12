@@ -4,19 +4,21 @@ output: html_document
 ---
 
 # libraries and dependencies
-```{r}
+```{r, warning=F,message=F}
 library(dplyr)
 library(nimble)
 library(nimbleNoBounds)
 library(nimbleMacros)
+
+source("/work/users/a/g/agfoes/P1/R/function_development/buildModelCode.R")
+source("/work/users/a/g/agfoes/P1/R/function_development/nimbleInputs.R")
+source("/work/users/a/g/agfoes/P1/R/function_development/dynamicglm.R")
+source("/work/users/a/g/agfoes/P1/R/function_development/customSamplers.R")
+
+source("/work/users/a/g/agfoes/P1/R/helpers/helpers_data.R")
 ```
 
-# ideal input
-## outcome model formula
-## outcome model family and link function
-## covariate model formula
-## censored covariates and their censoring bounds
-## data
+# input
 ```{r}
 outcome_formula <- y ~ x_1 + z_1 + z_2 + z_3
 outcome_family <- gaussian(link = "identity")
@@ -31,8 +33,24 @@ data <- data.frame(
   z_2 = c(3, 4, 5),
   z_3 = c(4, 5, 6),
   CL = c(5, 6, 7),
-  CR = c(6, 7, 8)
+  CR = c(5, 7, 8)
 )
+
+list2env(data, envir = .GlobalEnv)
+
+data <- datagen(n = 10)
+data <- data.frame(
+  Y = data$Y,
+  Z1 = data$Z1,
+  Z2 = data$Z2,
+  Z3 = data$Z3,
+  CL = data$CL,
+  CR = data$CR
+)
+outcome_formula <- Y ~ X + Z1 + Z2 + Z3
+covariate_formula <- X ~ Z1 + Z2 + Z3
+censored_covariate <- "X"
+censoring_bounds <- c("CL", "CR")
 ```
 
 # parse model formulas and data into design matrices
@@ -70,14 +88,15 @@ nimble_inputs <- nimbleInputs(CL = data$CL,
 
 # build nimble model code depending on model formulas and families
 ```{r}
-family_def <- "gaussian(link = 'identity')"
+family_def <- "Gamma(link = 'log')"
 model_code <- buildModelCode(family = as.character(family_def),
-                             nobs = nimble_inputs$Nconstants$nobs,
-                             ncen = nimble_inputs$Nconstants$ncen)
+                             nobs = nimble_inputs$nobs,
+                             ncen = nimble_inputs$ncen)
 ```
 
 # configure, compile, build nimble model
 ```{r}
+nimbleOptions(enableMacros = TRUE)
 
 model <- nimbleModel(
   code = model_code,
@@ -89,10 +108,21 @@ model <- nimbleModel(
 
 conf <- configureMCMC(model,
                       useConjugacy = TRUE)
-
 conf$removeSamplers("beta")
 
-if (sampler_type == 'block') {
+
+sampler_type = "AF_slice"
+if (family_def == "gaussian(link = 'identity')") {
+  conf$addSampler(
+    target = "beta",
+    type = sampler_beta_normal_conjugate_block,
+    control = list(
+      pzy = pzy,
+      ncen = as.integer(nimble_inputs$ncen),
+      nobs = as.integer(nimble_inputs$nobs)
+    )
+  )
+} else if (sampler_type == 'block') {
 
   conf$addSampler(
     target = "beta",
@@ -105,55 +135,30 @@ if (sampler_type == 'block') {
     target = "beta",
     type = 'AF_slice'
   )
-} else if (sampler_type == "custom_joint_mixed") {
-    
-  conf$addSampler(
-    target = "beta",
-    type = sampler_beta_conjugate_block_mixed,
-    control = list(
-      p = pz,
-      nobs = as.integer(nobs),
-      ncen = as.integer(ncen)
-    )
-  )
-} else if (sampler_type == "custom_joint_obs") {
-  
-  conf$addSampler(
-    target = "beta",
-    type = sampler_beta_conjugate_block_obs,
-    control = list(
-      p = pz,
-      nobs = as.integer(nobs)
-    )
-  )
-} else if (sampler_type == "custom_joint_cen") {
-    
-  conf$addSampler(
-    target = "beta",
-    type = sampler_beta_conjugate_block_cen,
-    control = list(
-      p = pz,
-      ncen = as.integer(ncen)
-    )
-  )
 }
   
-  
-
 conf$printMonitors()
 conf$printSamplers("beta")
 ```
 
 
-# pick samplers depending on model family and link function
-```{r}
-# optional specify sampler for outcome model regression coefficients
-if (family == gaussian) {use joint conjugate normal sampler} # or just AF_slice?
-if (family != gaussian) {use AF_slice sampler}
-```
-
-
 # run nimble model and get samples
+```{r}
+mcmc <- buildMCMC(conf)
+Cmodel <- compileNimble(model)
+Cmcmc <- compileNimble(mcmc, project = Cmodel)
+  
+runtime <- system.time({
+  samples <- runMCMC(
+    Cmcmc,
+    niter = 100,
+    nburnin = 40,
+    thin = 1,
+    nchains = 1,
+    samplesAsCodaMCMC = TRUE
+  )
+})
+```
 
 # report summary statistics / return samples
 

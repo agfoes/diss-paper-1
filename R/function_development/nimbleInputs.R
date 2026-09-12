@@ -9,7 +9,7 @@ nimbleInputs <- function(
     Zx,
     Y = Y,
     sigma_bx = 1,
-    sigma_by = 1
+    sigma_bz = 1
 ) {
   
   # create dimension values
@@ -19,15 +19,21 @@ nimbleInputs <- function(
   
   # create censoring indicators, counts, and indices
   Dobs <- as.numeric(abs(CR - CL) <= obs_tolerance)
-  DL <- as.numeric(CL == lower_bound)
-  DR <- as.numeric(CR == upper_bound)
+  DL <- as.numeric(CL == -Inf | CL == lower_bound)
+  DR <- as.numeric(CR == Inf | CR == upper_bound)
   
   n <- dim(Zy)[1]
   nobs <- sum(Dobs)
   ncen <- n - nobs
   
-  idx_obs <- which(Dobs == 1)
-  idx_cen <- which(Dobs == 0)
+  idx_obs <- array(which(Dobs == 1), dim = nobs)
+  idx_cen <- array(which(Dobs == 0), dim = ncen)
+  
+  # adjust censoring bounds in case of infinite endpoints to provided lower/upper bounds
+  CL[is.infinite(CL)] <- lower_bound
+  CR[is.infinite(CR)] <- upper_bound
+  CL_cen <- CL[idx_cen]
+  CR_cen <- CR[idx_cen]
   
   # prior covariance for beta vector
   cov_beta <- diag(c(sigma_bx, sigma_bz), py)
@@ -46,11 +52,11 @@ nimbleInputs <- function(
     
     for (i in 1:ncen) {
       if (DL[idx_cen[i]] == 1) {
-        x_cen[i] = CR[i] - 0.1
+        x_cen[i] = CR_cen[i] - 0.1
       } else if (DR[idx_cen[i]] == 1) {
-        x_cen[i] = CL[i] + 0.1
+        x_cen[i] = CL_cen[i] + 0.1
       } else if (Dobs[idx_cen[i]] == 0) {
-        x_cen[i] = 0.5 * (CL[i] + CR[i])
+        x_cen[i] = 0.5 * (CL_cen[i] + CR_cen[i])
       }
     }
   }
@@ -58,16 +64,12 @@ nimbleInputs <- function(
   
   # separate observed and censored data
   x_obs <- CL[Dobs == 1]
-  zy_obs <- Zy[Dobs == 1, ]
-  zy_cen <- Zy[Dobs == 0, ]
-  zx_obs <- Zx[Dobs == 1, ]
-  zx_cen <- Zx[Dobs == 0, ]
+  zy_obs <- Zy[Dobs == 1, , drop = FALSE]
+  zy_cen <- Zy[Dobs == 0, , drop = FALSE]
+  zx_obs <- Zx[Dobs == 1, , drop = FALSE]
+  zx_cen <- Zx[Dobs == 0, , drop = FALSE]
   y_obs <- Y[Dobs == 1]
   y_cen <- Y[Dobs == 0]
-  
-  # adjust censoring bounds in case of infinite endpoints to provided lower/upper bounds
-  CL[is.infinite(CL)] <- lower_bound
-  CR[is.infinite(CR)] <- upper_bound
   
   
   # nimble constants to be returned as list
@@ -77,8 +79,7 @@ nimbleInputs <- function(
                      pzx = pzx,
                      beta_mean = rep(0, py),
                      beta_cov = cov_beta,
-                     nobs = nobs,
-                     ncen = ncen,
+                     mu_gamma = 0,
                      idx_obs = idx_obs,
                      idx_cen = idx_cen
   )
@@ -90,8 +91,8 @@ nimbleInputs <- function(
                 zy_cen = zy_cen,
                 zx_obs = zx_obs,
                 zx_cen = zx_cen,
-                CL = CL,
-                CR = CR,
+                CL_cen = CL_cen,
+                CR_cen = CR_cen,
                 x_obs = x_obs,
                 constraint_data = rep(1, ncen)
   )
@@ -108,7 +109,9 @@ nimbleInputs <- function(
   )
   
   # return list of data, constants, and initial values for nimble model
-  return(list(Ndata = Ndata,
+  return(list(ncen = ncen,
+              nobs = nobs,
+              Ndata = Ndata,
               Nconstants = Nconstants,
               Ninits = Ninits))
 }

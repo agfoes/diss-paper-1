@@ -6,6 +6,30 @@ buildModelCode <- function(
   
   family_def <- as.character(family)
   
+  # dimension changes for one-subject group sizes
+  if (nobs == 1) {
+    obs_idx <- 'idx_obs'
+    obs_k <- '1'
+    obs_loop_start <- ''
+    obs_loop_end <- ''
+  } else {
+    obs_idx <- 'idx_obs[k]'
+    obs_k <- 'k'
+    obs_loop_start <- paste0('for (k in 1:', nobs, ') {')
+    obs_loop_end <- '}'
+  }
+  if (ncen == 1) {
+    cen_idx <- 'idx_cen'
+    cen_k <- '1'
+    cen_loop_start <- ''
+    cen_loop_end <- ''
+  } else {
+    cen_idx <- 'idx_cen[k]'
+    cen_k <- 'k'
+    cen_loop_start <- paste0('for (k in 1:', ncen, ') {')
+    cen_loop_end <- '}'
+  }
+  
   base_block <- "
     beta[1:py] ~ dmnorm(
       mean = beta_mean[1:py],
@@ -38,98 +62,119 @@ buildModelCode <- function(
     }
   "
   
-  obs_block <- paste0("
-    for (k in 1:nobs) {
-      
-      # cluster assignment
-      xi[idx_obs[k]] ~ dcat(w[1:L])
-      
-      # assign component parameters based on cluster assignment
-      if (pzx > 1) {
-        for (j in 1:pzx) {
-          gamma[idx_obs[k],j] <- gammaTilde[xi[idx_obs[k]],j]
-        }
-      } else if (pzx == 1) {
-        gamma[idx_obs[k]] <- gammaTilde[xi[idx_obs[k]]]
-      }
+  obs_block <- paste0(
+      "
+  ", obs_loop_start, "
   
-      sigmasq[idx_obs[k]] <- sigmasqTilde[xi[idx_obs[k]]]
-      
-      # latent X
-      if (pzx > 1) {
-        mean_x[idx_obs[k]] <- inprod(gamma[idx_obs[k], 1:pzx], zx_obs[k, 1:pzx])
-      } else if (pzx == 1) {
-        mean_x[idx_obs[k]] <- gamma[idx_obs[k]] * zx_obs[k]
+    # cluster assignment
+    xi[", obs_idx, "] ~ dcat(w[1:L])
+  
+    # assign component parameters based on cluster assignment
+    if (pzx > 1) {
+      for (j in 1:pzx) {
+        gamma[", obs_idx, ", j] <- gammaTilde[xi[", obs_idx, "], j]
       }
-      
-      x_obs[k] ~ dnorm(
-        mean = mean_x[idx_obs[k]],
-        var = sigmasq[idx_obs[k]])
-      
-      # outcome model
-      if (pzy > 1) {
-        eta[idx_obs[k]] <- beta[1]*x_obs[k] + inprod(zy_obs[k, 1:pzy], beta[2:py])
-      } else if (pzy == 1) {
-        eta[idx_obs[k]] <- beta[1]*x_obs[k] + zy_obs[k] * beta[2]
-      } else if (pzy == 0) {
-        eta[idx_obs[k]] <- beta[1]*x_obs[k]
-      }
-      
-      
-      y_obs[k] ~ DYNAMICGLM(
-        eta = eta[idx_obs[k]],
-        family = ", family_def, ",
-        tau = tau
-      )
+    } else if (pzx == 1) {
+      gamma[", obs_idx, "] <- gammaTilde[xi[", obs_idx, "]]
     }
-  "
+  
+    sigmasq[", obs_idx, "] <- sigmasqTilde[xi[", obs_idx, "]]
+  
+    # latent X
+    if (pzx > 1) {
+      mean_x[", obs_idx, "] <- inprod(
+        gamma[", obs_idx, ", 1:pzx],
+        zx_obs[", obs_k, ", 1:pzx]
+      )
+    } else if (pzx == 1) {
+      mean_x[", obs_idx, "] <- gamma[", obs_idx, "] * zx_obs[", obs_k, "]
+    }
+  
+    x_obs[", obs_k, "] ~ dnorm(
+      mean = mean_x[", obs_idx, "],
+      var = sigmasq[", obs_idx, "]
     )
   
-  cen_block <- paste0("
-    for (k in 1:ncen) {
-      
-      # cluster assignment
-      xi[idx_cen[k]] ~ dcat(w[1:L])
-      
-      # assign component parameters based on cluster assignment
-      if (pzx > 1) {
-        for (j in 1:pzx) {
-          gamma[idx_cen[k],j] <- gammaTilde[xi[idx_cen[k]],j]
-        }
-      } else if (pzx == 1) {
-        gamma[idx_cen[k]] <- gammaTilde[xi[idx_cen[k]]]
-      }
-      
-      sigmasq[idx_cen[k]] <- sigmasqTilde[xi[idx_cen[k]]]
-  
-      # latent X
-      if (pzx > 1) {
-        mean_x[idx_cen[k]] <- inprod(gamma[idx_cen[k], 1:pzx], zx_cen[k, 1:pzx])
-      } else if (pzx == 1) {
-        mean_x[idx_cen[k]] <- gamma[idx_cen[k]] * zx_cen[k]
-      }
-      x_cen[k] ~ dnorm(
-        mean = mean_x[idx_cen[k]],
-        var = sigmasq[idx_cen[k]])
-      
-      # outcome model
-      if (pzy > 1) {
-        eta[idx_cen[k]] <- beta[1]*x_cen[k] + inprod(zy_cen[k, 1:pzy], beta[2:py])
-      } else if (pzy == 1) {
-        eta[idx_cen[k]] <- beta[1]*x_cen[k] + zy_cen[k] * beta[2]
-      } else if (pzy == 0) {
-        eta[idx_cen[k]] <- beta[1]*x_cen[k]
-      }
-      
-      
-      y_cen[k] ~ DYNAMICGLM(
-        eta = eta[idx_cen[k]],
-        family = ", family_def, ",
-        tau = tau
-      )
+    # outcome model
+    if (pzy > 1) {
+      eta[", obs_idx, "] <- beta[1] * x_obs[", obs_k, "] +
+        inprod(zy_obs[", obs_k, ", 1:pzy], beta[2:py])
+    } else if (pzy == 1) {
+      eta[", obs_idx, "] <- beta[1] * x_obs[", obs_k, "] +
+        zy_obs[", obs_k, "] * beta[2]
+    } else if (pzy == 0) {
+      eta[", obs_idx, "] <- beta[1] * x_obs[", obs_k, "]
     }
-  "
+  
+    y_obs[", obs_k, "] ~ DYNAMICGLM(
+      eta = eta[", obs_idx, "],
+      family = ", family_def, ",
+      tau = tau
     )
+  
+  ", obs_loop_end, "
+  "
+  )
+  
+  cen_block <- paste0(
+      "
+  ", cen_loop_start, "
+  
+    # cluster assignment
+    xi[", cen_idx, "] ~ dcat(w[1:L])
+    
+    # assign component parameters based on cluster assignment
+    if (pzx > 1) {
+      for (j in 1:pzx) {
+        gamma[", cen_idx, ", j] <- gammaTilde[xi[", cen_idx, "], j]
+      }
+    } else if (pzx == 1) {
+      gamma[", cen_idx, "] <- gammaTilde[xi[", cen_idx, "]]
+    }
+    
+    sigmasq[", cen_idx, "] <- sigmasqTilde[xi[", cen_idx, "]]
+  
+    # latent X
+    if (pzx > 1) {
+      mean_x[", cen_idx, "] <- inprod(
+        gamma[", cen_idx, ", 1:pzx],
+        zx_cen[", cen_k, ", 1:pzx]
+      )
+    } else if (pzx == 1) {
+      mean_x[", cen_idx, "] <- gamma[", cen_idx, "] * zx_cen[", cen_k, "]
+    }
+  
+    x_cen[", cen_k, "] ~ dnorm(
+      mean = mean_x[", cen_idx, "],
+      var = sigmasq[", cen_idx, "]
+    )
+    
+    # censoring constraint
+    constraint_data[", cen_k, "] ~ dconstraint(
+      (x_cen[", cen_k, "] > CL_cen[", cen_k, "] &
+      x_cen[", cen_k, "] <= CR_cen[", cen_k, "])
+    )
+    
+    # outcome model
+    if (pzy > 1) {
+      eta[", cen_idx, "] <- beta[1] * x_cen[", cen_k, "] +
+        inprod(zy_cen[", cen_k, ", 1:pzy], beta[2:py])
+    } else if (pzy == 1) {
+      eta[", cen_idx, "] <- beta[1] * x_cen[", cen_k, "] +
+        zy_cen[", cen_k, "] * beta[2]
+    } else if (pzy == 0) {
+      eta[", cen_idx, "] <- beta[1] * x_cen[", cen_k, "]
+    }
+    
+    y_cen[", cen_k, "] ~ DYNAMICGLM(
+      eta = eta[", cen_idx, "],
+      family = ", family_def, ",
+      tau = tau
+    )
+  
+  ", cen_loop_end, "
+  "
+  )
   
   if (nobs > 0 & ncen > 0) {
     model_text <- paste("{", base_block, cen_block, obs_block, "}")
