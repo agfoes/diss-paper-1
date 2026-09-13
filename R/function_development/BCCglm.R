@@ -17,7 +17,7 @@ BCCglm <- function(
     covariate_formula,
     censored_covariate,
     censoring_bounds,
-    family <- "Gamma(link = 'log')"
+    family = "Gamma(link = 'log')"
     ) {
   
   # remove censored variable from outcome formula
