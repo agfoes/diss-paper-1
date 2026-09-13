@@ -12,127 +12,170 @@ library(nimbleMacros)
 
 source("/work/users/a/g/agfoes/P1/R/function_development/BCCglm.R")
 source("/work/users/a/g/agfoes/P1/R/function_development/customSamplers.R")
+source("/work/users/a/g/agfoes/P1/R/function_development/dynamicglm.R")
 source("/work/users/a/g/agfoes/P1/R/helpers/helpers_data.R")
+
+set.seed(09132026)
 ```
 
 # generate data
 ```{r}
-datagen_glm <- function(outcome = "normal",                                         # normal, gamma, neg binomial, bernoulli, poisson
-                        link = "identity",
-                        n = 100,                                                    # sample size
-                        pzy = 3,
-                        pzx = 3,
-                        mu_z = c(0.8, 0.6, 0.2),
-                        sd_z = c(1, 1, 1),
-                        #p_z2 = 0.8,                                                 # observed covariate Z2 ~ bern(p_z2)
-                        #mu_z3 = 5, sd_z3 = 1,                                       # mean and sd for observed covariate Z3 ~ N(mu_z3, sd_z3)
-                        comps = 3, w = c(0.3, 0.5, 0.2),                            # number of components for mixture X|Z and probabilities for each component
-                        gamma = matrix(c(0, 3, 1, 
-                                         0, 1, 5, 
-                                         0, 2, 2), 
-                                       nrow = 3, byrow = TRUE)*365.25,              # linear coeff. for X|Z ~ N(Z*gamma, x_sd)
-                        x_sd = c(0.5, 1, 1)*365.25,
-                        beta_x = 0.4/365.25,                                        # coefficients for outcome linear predictor on X
-                        beta_z = c(0.2, 0.1, 0.2),                                  # coefficients for outcome linear predictor on Z
-                        tau = 1,                                                    # outcome precision parameter
-                        beta_omega = matrix(c(0, 0.5, 0.25,
-                                              0, 0.25, 0.10),
-                                            nrow = 2, byrow = TRUE),                # coefficients for visit generation observation category
-                        alpha_start = c(5, 2, -0.5)*365.25,                         # parameter for start of observation window T0 ~ N(alpha * Z, sigma_start)
-                        alpha_width = c(log(6*365.25), 0.25, -0.05),                # parameter for width of observation window log(W) ~ N(alpha * Z, sigma_width)
-                        sigma_start = 1, sigma_width = 0.15,
-                        jitter_sd = 30,                                             # sd for random noise added to each visit
-                        rho = c(0.85, 0.9, 0.99),                                   # vector of probabilities for observing a visit
-                        eps_obs = 350                                               # tolerance window for defining uncensored observations in X
-) {
+dg_glm <- function(
+    n = 1000,
+    outcome_formula = Y ~ X + Z2 + Z3,
+    covariate_formula = X ~ Z2 + Z3,
+    family = gaussian(link = 'identity'),
+    
+    beta = c(1, 0.7, 1, -1),
+    
+    censoring = 0.80,
+    z_spec = list(
+      Z2 = list(dist = 'bernoulli',
+                prob = 0.8),
+      Z3 = list(dist = 'normal',
+                mean = 2, sd = 1)
+    )) {
   
-  ## observed covariates
-  #Z1 <- rep(1, n)                                                               # intercept
-  #Z2 <- rbinom(n = n, size = 1, p_z2)                                           # Z2 ~ binomial(p_z2)
-  #Z3 <- rnorm(n, mean = mu_z3, sd = sd_z3)                                      # Z3 ~ normal(mu_z3, sd_z3)
-  #Z <- cbind(Z1, Z2, Z3)
+  outcome_name <- all.vars(outcome_formula)[1]
+  x_name <- all.vars(covariate_formula)[1]
   
-  Zy = matrix(data = NA, nrow = n, ncol = pzy)
-  for (j in 1:pzy) {
-    Zy[, j] <- rnorm(n, mu_z[j], sd_z[j])
+  # create Z - uncensored covariates
+  gen_z <- function(spec, n) {
+    switch(
+      spec$dist,
+      "normal" = {rnorm(n, mean = spec$mean, sd = spec$sd)},
+      "bernoulli" = {rbinom(n, size = 1, prob = spec$prob)},
+      "uniform" = {runif(n, min = spec$min, max = spec$max)}
+    )
+  }
+  Z <- as.data.frame(lapply(z_spec, gen_z, n = n))
+  names(Z) <- names(z_spec)
+  
+  # covariate model design matrix
+  x_terms <- delete.response(terms(covariate_formula))
+  Zx <- model.matrix(x_terms, data = Z)
+  pzx <- ncol(Zx)
+  
+  # DPMM parameters for X|Z
+  comps <- 3
+  w <- c(0.3, 0.5, 0.2)
+  x_sd <- c(1, 1.2, 1.5)
+  gamma <- matrix(c(0.5, 2, 1.5,
+                    0.7, 3, 2,
+                    0.9, 4, 3),
+                  nrow = comps,
+                  ncol = pzx,
+                  byrow = TRUE,
+                  dimnames = list(NULL, colnames(Zx)))
+  
+  # generate X
+  cluster <- sample(seq_len(comps),
+                    size = n,
+                    replace = TRUE,
+                    prob = w)
+  
+  x_mean <- rowSums(Zx * gamma[cluster, , drop = FALSE])
+  X <- rnorm(n, mean = x_mean, sd = x_sd[cluster])
+  
+  model_data <- Z
+  model_data[[x_name]] <- X
+  
+  # outcome design matrix
+  y_terms <- delete.response(terms(outcome_formula))
+  Zy <- model.matrix(y_terms, data = model_data)
+  pzy <- ncol(Zy)
+  
+  eta <- as.numeric(Zy %*% beta)
+  
+  # generate outcome
+  mu <- family$linkinv(eta)
+  tau <- 1
+  family_name <- family$family
+  
+  if (family_name == "gaussian") {
+    Y <- rnorm(n, mean = mu, sd = 1/sqrt(tau))
+  } else if (family_name == "binomial") {
+    Y <- rbinom(n, size = 1, prob = mu)
+  } else if (family_name == "Gamma") {
+    Y <- rgamma(n, shape = tau, rate = tau / mu)
+  } else if (family_name == "poisson") {
+    Y <- rpois(n, lambda = mu)
   }
   
-  Zx = Zy[, c(1:pzx)]
+  # censoring mechanism
+  beta_omega <- matrix(c(0, 1.5, -0.5,
+                         0, 0.5, 0),
+                       nrow = 2, byrow = TRUE)
+  rho <- c(0.90, 0.95, 0.99)
   
-  ## censored covariate
-  cluster <- sample(1:comps, n, replace = TRUE, prob = w)                       # sample X|Z cluster assignment from weights w
-  means <- rowSums(Zx * gamma[cluster, 1:3])                                     # mean of X|Z determined by cluster assignment and gamma row
-  X <- rnorm(n, mean = means, sd = x_sd[cluster])                               # X|Z ~ normal(mean[cluster], sd[cluster])
+  sigma_start <- 0.082
+  sigma_width <- 0.15
+  jitter_sd <- 0.082
   
-  ## outcome
-  eta <- beta_x * X + Zy %*% beta_z
+  censoring_key <- as.character(censoring)
+  censoring_pars <- switch(
+    censoring_key,
+    "0.2" = list(
+      alpha_start = c(1.5, 0.4, 1),
+      alpha_width = c(1.1, 2, -0.2),
+      eps_obs = 2.1
+    ),
+    "0.4" = list(
+      alpha_start = c(2, 1, 1),
+      alpha_width = c(1, 1.5, -0.2),
+      eps_obs = 1.5
+    ),
+    "0.8" = list(
+      alpha_start = c(2.7, 1.4, 1.1),
+      alpha_width = c(0.9, 0.5, -0.3),
+      eps_obs = 1.1
+    ),
+  )
+  alpha_start <- censoring_pars$alpha_start
+  alpha_width <- censoring_pars$alpha_width
+  eps_obs <- censoring_pars$eps_obs
   
-  if (outcome == "normal") {
-    
-    Y <- rnorm(n, mean = eta, sd = 1/sqrt(tau))
-    
-  } else if (outcome == "bernoulli") {
-    
-    theta <- plogis(eta)
-    Y <- rbinom(n, size = 1, prob = theta)
-    
-  } else if (outcome == "gamma") {
-    
-    theta <- exp(eta)
-    Y <- rgamma(n, shape = tau, rate = tau/theta)
-    
-  } else if (outcome == "poisson") {
-    
-    theta <- exp(eta)
-    Y <- rpois(n, lambda = theta)
-    
-  } else if (outcome == "negbin") {
-    
-    theta <- exp(eta)
-    Y <- rnbinom(n, size = tau, mu = theta)
-    
-  }
+  Zc <- model.matrix( ~ Z2 + Z3, data = Z)
   
-  ## probability of observing a visit
-  omega_high <- as.numeric(Zy %*% beta_omega[1, ])                               # linear pred if subjects have high observation probability
-  omega_med <- as.numeric(Zy %*% beta_omega[2, ])                                # linear pred if subjects have medium observation probability
-  omega_low <- rep(0, n)                                                        # linear pred if subjects have low observation probability
+  omega_high <- as.numeric(Zc %*% beta_omega[1, ])
+  omega_med <- as.numeric(Zc %*% beta_omega[2, ])
+  omega_low <- rep(0, n)
   
-  exp_omega <- cbind(exp(omega_high), exp(omega_med), exp(omega_low))           # exponentiate linear predictors
-  pi_obs <- exp_omega / rowSums(exp_omega)                                      # calculate probabilities for observation probability assignment
+  exp_omega <- cbind(exp(omega_high),
+                     exp(omega_med),
+                     exp(omega_low))
   
-  nu <- apply(pi_obs, 1, function(p) {                                          # sample observation categories with ^ probabilities per subject
+  pi_obs <- exp_omega / rowSums(exp_omega)
+  nu <- apply(pi_obs, 1, function(p) {
     sample(1:3, size = 1, prob = p)
   })
   
-  ## observation window
-  T0 <- rnorm(n, mean = as.numeric(Zy %*% alpha_start), sd = sigma_start)        # observation window start visit
-  W <- rlnorm(n, meanlog = as.numeric(Zy %*% alpha_width), sd = sigma_width)     # width of observation window
+  # observation window
+  T0 <- rnorm(n, mean = as.numeric(Zc %*% alpha_start), sd = sigma_start)
+  W <- rlnorm(n, meanlog = as.numeric(Zc %*% alpha_width), sdlog = sigma_width)
   T1 <- T0 + W
   
-  ## storage
   CL <- CR <- numeric(n)
-  DL <- DR <- Dobs <- integer(n)
   K_planned <- K_obs <- integer(n)
-  V_star <- V_tilde <- V <- r <- vector('list', n)
+  V_star <- V_tilde <- V <- r <- vector("list", n)
   
-  ## generate visit data
+    ## generate visit data
   for (i in seq_len(n)) {
     
     # initialize empty (zero-length) storage for visit vectors and observation indicator vector
     V_star_i <- V_tilde_i <- V_i <- numeric(0)       
     r_i <- integer(0)
     
-    K_planned[i] <- floor(W[i] / 365.25)                                        # number of visits if none missed
+    K_planned[i] <- floor(W[i])                                        # number of visits if none missed
     
     if (K_planned[i] > 0) {                         
-      V_star_i <- T0[i] + 365.25 * seq_len(K_planned[i])                        # visits start as every year from observation window start
+      V_star_i <- T0[i] + seq_len(K_planned[i])                        # visits start as every year from observation window start
       
       V_tilde_i <- V_star_i + rnorm(K_planned[i], mean = 0, sd = jitter_sd)     # add noise to annual visit
       V_tilde_i <- sort(pmin(pmax(V_tilde_i, T0[i]), T1[i]))                    # sort visits in case ordering switched from added noise
       
       r_i <- rbinom(K_planned[i], size = 1, prob = rho[nu[i]])                  # sample observation indicator
-      V_i <- V_tilde_i[r_i == 1]                                                # mask visits with observation idicator
+      V_i <- V_tilde_i[r_i == 1]                                                # mask visits with observation indicator
     }
     
     # add in T0 as a forced observed visit (if a subject never comes to the enrollment visit they aren't in the study anyway so this makes sense)'
@@ -152,24 +195,20 @@ datagen_glm <- function(outcome = "normal",                                     
     if (X[i] < V_i[1]) {                                                        # if X is left censored
       CL[i] <- -Inf
       CR[i] <- V_i[1]
-      DL[i] <- 1
     } else if (X[i] > V_i[K_obs[i]]) {                                          # if X is right censored
       CL[i] <- V_i[K_obs[i]]
       CR[i] <- Inf
-      DR[i] <- 1
     } else {                                                                    # X either interval or uncensored
       right_idx <- which(V_i >= X[i])[1]                                        # smallest visit greater than X
       
       if (X[i] == V_i[right_idx]) {                                             # if X falls exactly on a visit
         CL[i] <- CR[i] <- X[i]
-        Dobs[i] <- 1
       } else {                                                                  # if X is interval censored
         left <- V_i[right_idx - 1]
         right <- V_i[right_idx]
         
         if ((right - left) <= eps_obs) {                                        # if X is interval censored with endpoints within tolerance, define as uncensored
           CL[i] <- CR[i] <- X[i]
-          Dobs[i] <- 1
         } else {
           CL[i] <- left
           CR[i] <- right
@@ -178,33 +217,60 @@ datagen_glm <- function(outcome = "normal",                                     
     }
   }
   
-  return(list(
-    outcome = as.character(outcome),
-    
-    Zx = Zx,
-    Zy = Zy,
-    X = X,
-    Y = Y,
-    cluster = cluster,
-    
-    T0 = T0,
-    T1 = T1,
-    W = W,
-    nu = nu,
-    K_planned = K_planned,
-    K_obs = K_obs,
-    V_star = V_star,
-    V_tilde = V_tilde,
-    V = V,
-    r = r,
-    rho = rho,
-    
-    CL = CL,
-    CR = CR,
-    DL = DL,
-    DR = DR,
-    Dobs = Dobs
-  ))
+  dat <- Z
+  dat[[outcome_name]] <- Y
+  dat$CL <- CL
+  dat$CR <- CR
+  
+  return(list(data = dat,
+              
+              X = X,
+              Y = Y,
+              Zx = Zx,
+              Zy = Zy,
+              
+              cluster = cluster,
+              
+              CL = CL,
+              CR = CR
+              ))
 }
+```
+
+# normal - identity
+```{r}
+data <- dg_glm(family = Gamma(link = 'log'),
+               n = 1000,
+               censoring = 0.2)
+
+norm_dat <- data$data
+
+fit <- BCCglm(data = norm_dat,
+              outcome_formula = Y ~ X + Z2 + Z3, # default adds intercept
+              family = Gamma(link = 'log'),
+              covariate_formula = X ~ Z2 + Z3, # default adds intercept
+              censored_covariate = "X",
+              censoring_bounds = c("CL", "CR"))
+```
+
+
+# test with GELc datagen
+```{r}
+gelc_data <- datagen_gelc_gamma()
+list2env(gelc_data, envir = .GlobalEnv)
+
+gamma_dat <- data.frame(Y = Y,
+                        X1 = X1,
+                        Z = Z,
+                        CL = CL,
+                        CR = CR)
+
+fit_gamma <- BCCglm(data = gamma_dat,
+                    outcome_formula = Y ~ 0 + X1 + Z,
+                    family = Gamma(link = 'log'),
+                    covariate_formula = Z ~ 0 + X1,
+                    censored_covariate = "Z",
+                    censoring_bounds = c("CL", "CR"))
+# one fit - good posterior mean for betas with GELc gamma DGP
 ```
 

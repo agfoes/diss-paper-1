@@ -17,13 +17,16 @@ BCCglm <- function(
     covariate_formula,
     censored_covariate,
     censoring_bounds,
-    family = "Gamma(link = 'log')"
+    family = Gamma(link = 'log'),
+    sampler_type = "AF_slice",
+    niter = 10000,
+    nburnin = 4000
     ) {
   
   # remove censored variable from outcome formula
   observed_formula <- update(
     outcome_formula,
-    paste(". ~ . -", paste(censored_covariate, collapse = " - "))
+    as.formula(paste(". ~ . -", paste(censored_covariate, collapse = " - ")))
   )
   
   # create model frame, response, matrices
@@ -46,7 +49,12 @@ BCCglm <- function(
                                 Y = Y)
   
   # outcome distribution family and link function for model code
-  family_def <- as.character(family)
+  family_def <- paste0(
+    family$family,
+    "(link = '",
+    family$link,
+    "')"
+  )
   model_code <- buildModelCode(family = as.character(family_def),
                                nobs = nimble_inputs$nobs,
                                ncen = nimble_inputs$ncen)
@@ -62,7 +70,6 @@ BCCglm <- function(
   conf <- configureMCMC(model, useConjugacy = TRUE)
   conf$removeSamplers("beta")
   
-  sampler_type = "AF_slice"
   if (family_def == "gaussian(link = 'identity')") {
     conf$addSampler(
       target = "beta",
@@ -96,8 +103,8 @@ BCCglm <- function(
   runtime <- system.time({
     samples <- runMCMC(
       Cmcmc,
-      niter = 100,
-      nburnin = 40,
+      niter = niter,
+      nburnin = nburnin,
       thin = 1,
       nchains = 1,
       samplesAsCodaMCMC = TRUE
@@ -375,7 +382,17 @@ nimbleInputs <- function(
   tau = 1
   lalpha = 0
   sigmasqTilde = rep(1, L)
-  gammaTilde = matrix(rnorm(L*pzx, 0, 1), nrow = L, ncol = pzx)
+  
+  if (pzx > 1) {
+    gammaTilde <- matrix(
+      rnorm(L * pzx, 0, 1),
+      nrow = L,
+      ncol = pzx
+    )
+  } else {
+    gammaTilde <- rnorm(L, 0, 1)
+  }
+
   xi <- sample(1:L, n, replace = TRUE)
   v <- rbeta(L-1, 1, 1)
   
@@ -396,10 +413,20 @@ nimbleInputs <- function(
   
   # separate observed and censored data
   x_obs <- CL[Dobs == 1]
-  zy_obs <- Zy[Dobs == 1, , drop = FALSE]
-  zy_cen <- Zy[Dobs == 0, , drop = FALSE]
-  zx_obs <- Zx[Dobs == 1, , drop = FALSE]
-  zx_cen <- Zx[Dobs == 0, , drop = FALSE]
+  if (pzy > 1) {
+    zy_obs <- Zy[Dobs == 1, , drop = FALSE]
+    zy_cen <- Zy[Dobs == 0, , drop = FALSE]
+  } else if (pzy == 1) {
+    zy_obs <- Zy[Dobs == 1, 1]
+    zy_cen <- Zy[Dobs == 0, 1]
+  }
+  if (pzx > 1) {
+    zx_obs <- Zx[Dobs == 1, , drop = FALSE]
+    zx_cen <- Zx[Dobs == 0, , drop = FALSE]
+  } else if (pzx == 1) {
+    zx_obs <- Zx[Dobs == 1, 1]
+    zx_cen <- Zx[Dobs == 0, 1]
+  }
   y_obs <- Y[Dobs == 1]
   y_cen <- Y[Dobs == 0]
   
