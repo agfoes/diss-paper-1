@@ -457,7 +457,7 @@ for (i in seq_along(mu_grid)) {
   
 }
 
-gelc_stress <- do.call(rbid, gelc_stress_test)
+gelc_stress <- do.call(rbind, gelc_stress_test)
 
 ```
 
