@@ -33,9 +33,30 @@ posterior_summary <- function(samples, sampler_name, truth, key_vars, runtime) {
   
   ## occupied clusters
   xi_cols <- grep("^xi\\[", colnames(samples_matrix))
-  occupied <- apply(samples_matrix[, xi_cols, drop = FALSE],
-                    1,
-                    function(x) length(unique(x)))
+  
+  if (length(xi_cols) > 0) {
+    
+    occupied <- apply(
+      samples_matrix[, xi_cols, drop = FALSE],
+      1,
+      function(x) length(unique(x))
+    )
+    
+    mean_occupied <- mean(occupied)
+    sd_occupied <- sd(occupied)
+    median_occupied <- median(occupied)
+    min_occupied <- min(occupied)
+    max_occupied <- max(occupied)
+    
+  } else {
+    
+    mean_occupied <- NA
+    sd_occupied <- NA
+    median_occupied <- NA
+    min_occupied <- NA
+    max_occupied <- NA
+  }
+  
   
   ## parameter summaries
   samples <- samples[, c(colnames(samples_matrix)[beta_cols], "tau"), drop = FALSE]
@@ -67,11 +88,11 @@ posterior_summary <- function(samples, sampler_name, truth, key_vars, runtime) {
     squared_error = (post_mean - truth_values)^2,
     covered = (truth_values >= hpd[, 'lower'] &
       truth_values <= hpd[, 'upper']),
-    mean_occupied = mean(occupied),
-    sd_occupied = sd(occupied),
-    median_occupied = median(occupied),
-    min_occupied = min(occupied),
-    max_occupied = max(occupied)
+    mean_occupied = mean_occupied,
+    sd_occupied = sd_occupied,
+    median_occupied = median_occupied,
+    min_occupied = min_occupied,
+    max_occupied = max_occupied
   )
 }
 
