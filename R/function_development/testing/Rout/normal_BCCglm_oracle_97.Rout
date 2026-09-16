@@ -1,0 +1,485 @@
+
+R version 4.5.0 (2025-04-11) -- "How About a Twenty-Six"
+Copyright (C) 2025 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> 
+> library(dplyr)
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+> library(nimble)
+nimble version 1.4.3 is loaded.
+For more information on NIMBLE and a User Manual,
+please visit https://R-nimble.org.
+
+Attaching package: ‘nimble’
+
+The following object is masked from ‘package:stats’:
+
+    simulate
+
+The following object is masked from ‘package:base’:
+
+    declare
+
+> library(nimbleNoBounds)
+Loading nimbleChangeOfVariables. 
+Registering the following user-defined functions:
+ dLogExp, dLogGamma
+
+> library(nimbleMacros)
+> 
+> main_folder <- "/work/users/a/g/agfoes/P1"
+> 
+> source(file.path(main_folder, "R/function_development/BCCglm.R"))
+Warning message:
+In .checkFieldsInMethod(def, fieldNames, allMethods) :
+  local assignment to field name will not change the field:
+    i <- nobs + k
+ Did you mean to use "<<-"? ( in method "run" for class "nfRefClass_R_GlobalEnv15")
+> source(file.path(main_folder, "R/function_development/buildModelCode.R"))
+> source(file.path(main_folder, "R/function_development/customSamplers.R"))
+Warning message:
+In .checkFieldsInMethod(def, fieldNames, allMethods) :
+  local assignment to field name will not change the field:
+    i <- nobs + k
+ Did you mean to use "<<-"? ( in method "run" for class "nfRefClass_R_GlobalEnv16")
+> source(file.path(main_folder, "R/function_development/dg_glm.R"))
+> source(file.path(main_folder, "R/function_development/dynamicglm.R"))
+> source(file.path(main_folder, "R/function_development/nimbleInputs.R"))
+> 
+> sim_grid <- expand.grid(n = c(100, 500, 1000),
++                         cens = c("0.2", "0.4", "0.8"))
+> 
+> slurm_id <- as.numeric(Sys.getenv("SLURM_ARRAY_TASK_ID"))
+> 
+> set.seed(as.numeric(09022026 + as.numeric(slurm_id)))
+> 
+> for (i in 1:9) {
++   n <- sim_grid[i, "n"]
++   cens <- sim_grid[i, "cens"]
++   
++   set.seed(as.numeric(09022026 + as.numeric(slurm_id) + as.numeric(n)))
++   
++   data <- dg_glm(n = n,
++                  cens = cens,
++                  family = gaussian(link = 'identity'),
++                  beta = c(1, 0.7, -1, 1) # truth in order of output: (0.7, 1, -1, 1)
++                  )
++   fit_data <- data$data
++   oracle_data <- data$data %>%
++     mutate(X = data$X)
++   
++   fit_time <- system.time({
++     fit <- BCCglm(data = fit_data,
++                   outcome_formula = Y ~ X + Z2 + Z3, # default adds intercept
++                   family = gaussian(link = 'identity'),
++                   covariate_formula = X ~ Z2 + Z3, # default adds intercept
++                   censored_covariate = "X",
++                   censoring_bounds = c("CL", "CR"))
++   })[["elapsed"]]
++   
++   beta_summary <- summary(fit$samples)$statistics[1:4, ]
++   
++   oracle_time <- system.time({
++     oracle_fit <- glm(Y ~ X + Z2 + Z3, data = oracle_data,
++                       family = gaussian(link = 'identity'))
++   })[["elapsed"]]
++   
++   oracle_summary <- as.data.frame(summary(oracle_fit)$coefficients)
++   oracle_summary$term <- rownames(oracle_summary)
++   rownames(oracle_summary) <- NULL
++   
++   oracle_summary <- oracle_summary[
++     , c('term', 'Estimate', 'Std. Error', 't value', 'Pr(>|t|)')
++   ]
++   
++   # runtime results
++   runtimes <- data.frame(
++     method = c("oracle", "bccglm"),
++     runtime = c(
++       oracle_time,
++       fit_time
++     )
++   )
++   
++   # save res
++   write.csv(fit$samples,
++             file = file.path(main_folder, "results/normal_BCCglm_oracle/samples", 
++                              paste0("data_n_", n, 
++                                     "_cens_", as.numeric(cens), 
++                                     "_array_", as.numeric(slurm_id),
++                                     ".csv")),
++             row.names = FALSE)
++   write.csv(beta_summary,
++             file = file.path(main_folder, "results/normal_BCCglm_oracle/summaries", 
++                              paste0("data_n_", n, 
++                                     "_cens_", as.numeric(cens), 
++                                     "_array_", as.numeric(slurm_id),
++                                     ".csv")),
++             row.names = FALSE)
++   write.csv(oracle_summary,
++             file = file.path(main_folder, "results/normal_BCCglm_oracle/summaries", 
++                              paste0("data_n_", n, 
++                                     "_cens_", as.numeric(cens), 
++                                     "_array_", as.numeric(slurm_id),
++                                     ".csv")),
++             row.names = FALSE)
++   write.csv(runtimes,
++             file = file.path(main_folder, "results/normal_BCCglm_oracle/runtimes", 
++                              paste0("data_n_", n, 
++                                     "_cens_", as.numeric(cens), 
++                                     "_array_", as.numeric(slurm_id),
++                                     ".csv")),
++             row.names = FALSE)
++   
++   # save data
++   saveRDS(data, file = file.path(main_folder, "results/normal_BCCglm_oracle/data", 
++                                  paste0("data_n_", n, 
++                                         "_cens_", as.numeric(cens), 
++                                         "_array_", as.numeric(slurm_id),
++                                         ".rds")))
++ }
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (26)
+  - lalpha
+  - x_cen[]  (25 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (100)
+  - xi[]  (100 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (101)
+  - lalpha
+  - x_cen[]  (100 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (500)
+  - xi[]  (500 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (216)
+  - lalpha
+  - x_cen[]  (215 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (1000)
+  - xi[]  (1000 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (46)
+  - lalpha
+  - x_cen[]  (45 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (100)
+  - xi[]  (100 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (217)
+  - lalpha
+  - x_cen[]  (216 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (500)
+  - xi[]  (500 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (408)
+  - lalpha
+  - x_cen[]  (407 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (1000)
+  - xi[]  (1000 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (80)
+  - lalpha
+  - x_cen[]  (79 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (100)
+  - xi[]  (100 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (427)
+  - lalpha
+  - x_cen[]  (426 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (500)
+  - xi[]  (500 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+Defining model
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Processing model macro `DYNAMICGLM`.
+  [Note] Macro 'DYNAMICGLM' declared LHS parameter(s): 'theta'
+         previously declared by macro 'DYNAMICGLM'.
+         This is not a problem if parameter indices don't overlap
+Building model
+Setting data and initial values
+Running calculate on model
+  [Note] Any error reports that follow may simply reflect missing values in model variables.
+Checking model sizes and dimensions
+===== Monitors =====
+thin = 1: beta, lalpha, sigmasqTilde, tau
+===== Samplers =====
+RW_block sampler (1)
+  - beta[1:4] 
+RW sampler (830)
+  - lalpha
+  - x_cen[]  (829 elements)
+conjugate sampler (250)
+  - tau
+  - sigmasqTilde[]  (50 elements)
+  - v[]  (49 elements)
+  - gammaTilde[]  (150 elements)
+categorical sampler (1000)
+  - xi[]  (1000 elements)
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+Compiling
+  [Note] This may take a minute.
+  [Note] Use 'showCompilerOutput = TRUE' to see C++ compilation details.
+running chain 1...
+|-------------|-------------|-------------|-------------|
+|-------------------------------------------------------|
+> 
+> proc.time()
+    user   system  elapsed 
+6888.127   30.135 6966.118 
+rm: cannot remove '/work/appscr/r/agfoes/RtmpP5WBdy/nimble_generatedCode': Directory not empty
