@@ -1,0 +1,9 @@
+---
+title: "JW_test"
+output: html_document
+---
+
+```{r}
+source("/work/users/a/g/agfoes/P1/R/Jwiest/JWglm.R")
+```
+
