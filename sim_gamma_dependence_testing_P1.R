@@ -22,7 +22,8 @@ datagen_gelc_gamma <- function(n = 500,
                                gamma = 0.02,
                                alpha = 10,
                                phi = 0.02,
-                               dep = 0) {
+                               dep = 0,
+                               delta = 0.5) {
   
   ## observed covariates for both the outcome and marginal regression models
   X1 <- rep(1, n)
@@ -33,11 +34,11 @@ datagen_gelc_gamma <- function(n = 500,
   if (dep == 0) {
     rateZ <- 1/12
   } else if (dep == 1) {
-    rateZ <- exp(log(1/12) + 0.5*(X2 - 0.8))
+    rateZ <- exp(log(1/12) + delta*(X2 - 0.8))
   } else if (dep == 2) {
-    rateZ <- exp(log(1/12) + 0.5*(X3 - 40))
+    rateZ <- exp(log(1/12) + delta*(X3 - 40))
   } else if (dep == 3) {
-    rateZ <- exp(log(1/12) + 0.5*(X2 - 0.8) + 0.5*(X3 - 40))
+    rateZ <- exp(log(1/12) + delta*(X2 - 0.8) + delta*(X3 - 40))
   }
   
   Z <- rexp(n, rate = rateZ)
@@ -129,12 +130,14 @@ if (task_id <= 500) {
 
 set.seed(09142026 + 1000 * rep + as.integer(dep))
 n <- 500
+delta <- 1
 dat <- datagen_gelc_gamma(n = n,
                           mu = 6,
                           gamma = 0.02,
                           alpha = 10,
                           phi = 0.02,
-                          dep = dep)
+                          dep = dep,
+                          delta = delta)
 
 
 p1_time <- system.time({
@@ -154,9 +157,10 @@ res <- as.data.frame(p1_summary) %>%
          n = 500,
          mu = 6,
          scenario = scenario,
-         dep = dep) %>%
+         dep = dep,
+         delta = delta) %>%
   tibble::rownames_to_column("parameter") %>%
   mutate(runtime = as.numeric(p1_time))
 
 
-write.csv(res, file = file.path(main_folder, "results/dependence_gelc/centered_X3_mult_scen_P1", paste0("results_", task_id, ".csv")))
+write.csv(res, file = file.path(main_folder, "results/dependence_gelc/increased_dependency_P1", paste0("results_", task_id, ".csv")))

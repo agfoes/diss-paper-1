@@ -56,7 +56,7 @@ datagen_gelc_gamma <- function(n = 500,
     Z = Z,
     X1 = X1,
     X2 = X2,
-    X3 = X3,
+    X3 = X3 - 40,
     CL = CL,
     CR = CR
   ))
@@ -122,7 +122,7 @@ if (task_id <= 500) {
 
 set.seed(09142026 + 1000 * rep + as.integer(dep))
 n <- 500
-delta <- 1
+delta <- 1.5
 dat <- datagen_gelc_gamma(n = n,
                           mu = 6,
                           gamma = 0.02,
@@ -157,4 +157,4 @@ res <- as.data.frame(gelc_coef) %>%
   mutate(runtime = as.numeric(gelc_time))
 
 
-write.csv(res, file = file.path(main_folder, "results/dependence_gelc/increased_dependency_GELc", paste0("results_", task_id, ".csv")))
+write.csv(res, file = file.path(main_folder, "results/dependence_gelc/delta_1-5_GELc", paste0("results_", task_id, ".csv")))
